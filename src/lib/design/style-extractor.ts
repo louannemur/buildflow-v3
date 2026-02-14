@@ -118,7 +118,11 @@ export function extractStyleTokens(code: string): StyleTokens {
 function extractFontImport(code: string): string | null {
   // Match @import url('...fonts.googleapis.com...')
   const importMatch = code.match(/@import\s+url\(['"]?(https:\/\/fonts\.googleapis\.com[^'")\s]+)['"]?\)/);
-  return importMatch ? importMatch[1] : null;
+  if (importMatch) return importMatch[1];
+
+  // Match <link href="...fonts.googleapis.com..."> (HTML style)
+  const linkMatch = code.match(/<link[^>]+href=['"]?(https:\/\/fonts\.googleapis\.com[^'">\s]+)['"]?/);
+  return linkMatch ? linkMatch[1] : null;
 }
 
 function extractFonts(code: string): StyleTokens['fonts'] {
@@ -140,8 +144,8 @@ function extractFonts(code: string): StyleTokens['fonts'] {
     fontClassNames.add(m[1].replace(/_/g, ' '));
   }
 
-  // From fontFamily: 'FontName' or fontFamily: "'FontName'"
-  const fontStyleMatches = code.matchAll(/fontFamily:\s*['"]'?([^'"]+)'?['"]/g);
+  // From fontFamily: 'FontName' (JSX) or font-family: 'FontName' (HTML inline style)
+  const fontStyleMatches = code.matchAll(/(?:fontFamily|font-family):\s*['"]'?([^'"]+)'?['"]/g);
   for (const m of fontStyleMatches) {
     fontClassNames.add(m[1].replace(/,.*/, '').trim());
   }
@@ -194,8 +198,8 @@ function extractColors(code: string): StyleTokens['colors'] {
     }
   }
 
-  // Extract hex from inline styles: background: '#hex', color: '#hex', backgroundColor: '#hex'
-  const styleHexMatches = code.matchAll(/(?:background(?:Color)?|color|borderColor):\s*['"]?(#[0-9a-fA-F]{3,8})['"]?/g);
+  // Extract hex from inline styles (both JSX camelCase and HTML kebab-case)
+  const styleHexMatches = code.matchAll(/(?:background(?:-color|Color)?|(?:^|[;:\s])color|border-?[Cc]olor):\s*['"]?(#[0-9a-fA-F]{3,8})['"]?/gm);
   for (const m of styleHexMatches) {
     const hex = normalizeHex(m[1]);
     colorCounts.set(hex, (colorCounts.get(hex) || 0) + 1);

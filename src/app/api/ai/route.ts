@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { designs, projects, pages } from "@/lib/db/schema";
@@ -9,6 +9,7 @@ import {
   editDesign,
   modifyElement,
   addSection,
+  inferPageType,
 } from "@/lib/ai/design";
 
 /* ─── Helpers ──────────────────────────────────────────────────────── */
@@ -56,10 +57,13 @@ async function getDesignContext(
     // Look for a style guide design in the same project
     if (!design.isStyleGuide) {
       const styleGuide = await db.query.designs.findFirst({
-        where: eq(designs.projectId, design.projectId),
-        columns: { html: true, isStyleGuide: true },
+        where: and(
+          eq(designs.projectId, design.projectId),
+          eq(designs.isStyleGuide, true),
+        ),
+        columns: { html: true },
       });
-      if (styleGuide?.isStyleGuide && styleGuide.html) {
+      if (styleGuide?.html) {
         fallback.styleGuideCode = styleGuide.html;
       }
     }
@@ -74,6 +78,9 @@ async function getDesignContext(
       fallback.pageName = page.title;
     }
   }
+
+  // Infer the page type from the page name
+  fallback.pageType = inferPageType(fallback.pageName);
 
   return fallback;
 }

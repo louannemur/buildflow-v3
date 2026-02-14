@@ -210,13 +210,32 @@ export function PricingContent() {
   const { user, isAuthenticated } = useCurrentUser();
   const currentPlan = isAuthenticated ? (user?.plan ?? "free") : undefined;
 
-  function handleCheckout(planKey: PlanKey) {
+  const [portalLoading, setPortalLoading] = useState(false);
+
+  async function handleCheckout(planKey: PlanKey) {
     if (!isAuthenticated) {
       router.push("/signup");
       return;
     }
 
     if (planKey === "free" || planKey === currentPlan) return;
+
+    // Existing paid subscriber → open Stripe billing portal to change plan
+    if (currentPlan && currentPlan !== "free") {
+      setPortalLoading(true);
+      try {
+        const res = await fetch("/api/stripe/portal", { method: "POST" });
+        const data = await res.json();
+        if (data.url) {
+          window.location.href = data.url;
+          return;
+        }
+      } catch {
+        // Fall through to checkout
+      } finally {
+        setPortalLoading(false);
+      }
+    }
 
     const interval = yearly ? "yearly" : "monthly";
     router.push(`/checkout?plan=${planKey}&interval=${interval}`);
@@ -400,11 +419,11 @@ export function PricingContent() {
                       variant={cta.variant}
                       size="sm"
                       className="w-full"
-                      disabled={cta.disabled}
+                      disabled={cta.disabled || portalLoading}
                       onClick={() => handleCheckout(tier.key)}
                     >
-                      {cta.label}
-                      {!cta.disabled && <ArrowRight className="size-3.5" />}
+                      {portalLoading && !cta.disabled ? "Redirecting..." : cta.label}
+                      {!cta.disabled && !portalLoading && <ArrowRight className="size-3.5" />}
                     </Button>
                   )}
                 </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import { X } from "lucide-react";
 import { useEditorStore, BREAKPOINT_WIDTHS } from "@/lib/editor/store";
 import type { EditorElement } from "@/lib/editor/store";
@@ -29,6 +29,29 @@ export function Canvas({ iframeRef }: CanvasProps) {
   const isFreePlan = !user?.plan || user.plan === "free";
 
   const iframeWidth = BREAKPOINT_WIDTHS[breakpoint];
+
+  // ─── Scale-to-fit (width only) ─────────────────────────────────────────
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+  const [containerH, setContainerH] = useState(600);
+
+  const recalcScale = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const availableW = el.clientWidth - 32; // p-4 = 16px each side
+    const availableH = el.clientHeight - 32;
+    setContainerH(availableH);
+    setScale(Math.min(1, availableW / iframeWidth));
+  }, [iframeWidth]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => recalcScale());
+    ro.observe(el);
+    recalcScale();
+    return () => ro.disconnect();
+  }, [recalcScale]);
 
   // Build and write preview to iframe
   useEffect(() => {
@@ -167,38 +190,59 @@ export function Canvas({ iframeRef }: CanvasProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- iframeRef is a stable ref
   }, [selectedBfId]);
 
+  // The iframe renders at full breakpoint width; height fills the container
+  // after accounting for the scale transform.
+  const iframeH = scale < 1 ? containerH / scale : containerH;
+
   return (
-    <div className="relative flex h-full w-full items-center justify-center overflow-auto bg-muted/30 p-4">
+    <div
+      ref={containerRef}
+      className="relative flex h-full w-full items-center justify-center overflow-hidden bg-muted/30 p-4"
+    >
+      {/* Outer sizer: takes up the scaled dimensions in layout */}
       <div
-        className={cn(
-          "relative shrink-0 overflow-hidden rounded-lg border border-border/60 bg-white shadow-sm transition-all duration-300",
-          mode === "preview" && "shadow-none",
-        )}
-        style={{ width: iframeWidth }}
+        style={{
+          width: scale < 1 ? iframeWidth * scale : iframeWidth,
+          height: containerH,
+        }}
       >
-        {source ? (
-          <iframe
-            ref={iframeRef}
-            title="Design canvas"
-            className="block h-[calc(100vh-12rem)] w-full border-none"
-            sandbox="allow-scripts allow-same-origin"
-            tabIndex={-1}
-          />
-        ) : (
-          <div className="flex h-[calc(100vh-12rem)] w-full items-center justify-center">
-            <div className="text-center">
-              <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-xl bg-muted">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-muted-foreground">
-                  <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                  <path d="M2 17l10 5 10-5" />
-                  <path d="M2 12l10 5 10-5" />
-                </svg>
+        {/* Inner: renders at full size, visually scaled down */}
+        <div
+          className={cn(
+            "relative overflow-hidden rounded-lg border border-border/60 bg-white shadow-sm transition-all duration-300",
+            mode === "preview" && "shadow-none",
+          )}
+          style={{
+            width: iframeWidth,
+            height: iframeH,
+            transform: scale < 1 ? `scale(${scale})` : undefined,
+            transformOrigin: "top left",
+          }}
+        >
+          {source ? (
+            <iframe
+              ref={iframeRef}
+              title="Design canvas"
+              className="block h-full w-full border-none"
+              sandbox="allow-scripts allow-same-origin"
+              tabIndex={-1}
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center">
+              <div className="text-center">
+                <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-xl bg-muted">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-muted-foreground">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                    <path d="M2 17l10 5 10-5" />
+                    <path d="M2 12l10 5 10-5" />
+                  </svg>
+                </div>
+                <p className="text-sm font-medium text-muted-foreground">No design yet</p>
+                <p className="mt-1 text-xs text-muted-foreground/70">Click Generate to create a design</p>
               </div>
-              <p className="text-sm font-medium text-muted-foreground">No design yet</p>
-              <p className="mt-1 text-xs text-muted-foreground/70">Click Generate to create a design</p>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {mode === "preview" && (

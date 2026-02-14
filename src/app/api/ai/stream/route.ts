@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { designs, projects, pages } from "@/lib/db/schema";
@@ -7,6 +7,7 @@ import {
   editDesignStream,
   modifyElementStream,
   addSectionStream,
+  inferPageType,
 } from "@/lib/ai/design";
 
 /* ─── Context Lookup ───────────────────────────────────────────── */
@@ -52,10 +53,13 @@ async function getDesignContext(
 
     if (!design.isStyleGuide) {
       const styleGuide = await db.query.designs.findFirst({
-        where: eq(designs.projectId, design.projectId),
-        columns: { html: true, isStyleGuide: true },
+        where: and(
+          eq(designs.projectId, design.projectId),
+          eq(designs.isStyleGuide, true),
+        ),
+        columns: { html: true },
       });
-      if (styleGuide?.isStyleGuide && styleGuide.html) {
+      if (styleGuide?.html) {
         ctx.styleGuideCode = styleGuide.html;
       }
     }
@@ -68,6 +72,9 @@ async function getDesignContext(
     });
     if (page) ctx.pageName = page.title;
   }
+
+  // Infer the page type from the page name
+  ctx.pageType = inferPageType(ctx.pageName);
 
   return ctx;
 }

@@ -179,23 +179,82 @@ export function getPageTypeGuidance(pageType: string): string {
   const type = pageType.toUpperCase();
   switch (type) {
     case "LANDING":
-      return `This is a marketing landing page. Focus on conversion — hero, social proof, benefits, and a strong closing CTA. Make the layout feel editorial, not templated.`;
+      return `PAGE TYPE: MARKETING / LANDING PAGE.
+Focus on conversion — hero, social proof, benefits, and a strong closing CTA. Make the layout feel editorial, not templated.`;
     case "DASHBOARD":
-      return `This is an application dashboard. Design a functional, data-rich interface with navigation, metrics, and content areas. This is NOT a marketing page — no hero sections, no CTAs. Think app UI, not website.`;
+      return `PAGE TYPE: APPLICATION DASHBOARD.
+IMPORTANT: This is a functional application interface, NOT a marketing page. Do NOT design a landing page or hero section.
+Design a data-rich dashboard UI with: sidebar or top navigation, metric cards/KPIs, data tables or charts, content areas, and action buttons. Think Stripe Dashboard, Linear, or Notion — a real working app interface. Use a clean, functional layout with cards, tables, and structured data displays.`;
     case "FORM":
-      return `This is a form page. Design a focused, distraction-free form experience with custom-styled inputs (never native browser elements), clear grouping, and validation states. Not a marketing page.`;
+      return `PAGE TYPE: FORM / INPUT PAGE.
+IMPORTANT: This is a functional form page, NOT a marketing page. Do NOT design a landing page or hero section.
+Design a focused form experience: custom-styled inputs (text fields, selects, checkboxes, radio buttons — never unstyled native elements), clear labels, logical field grouping, validation states, and a prominent submit button. Consider split layout (form on right, context/illustration on left) or clean centered single-column form. Examples: contact form, checkout, application form, survey.`;
     case "LIST":
-      return `This is a list/collection page. Design a browsable view with filtering, search, and well-structured item cards. Focus on information density and scannability. Not a marketing page.`;
+      return `PAGE TYPE: LIST / COLLECTION PAGE.
+IMPORTANT: This is a functional browsing interface, NOT a marketing page. Do NOT design a landing page or hero section.
+Design a browsable collection view with: search bar, filter controls, well-structured item cards in a grid or list layout, pagination or load-more, and empty states. Focus on information density and scannability. Think product catalog, member directory, or article archive.`;
     case "DETAIL":
-      return `This is a detail page for viewing a single item. Design for comprehensive information display with clear hierarchy, metadata, actions, and related content. Not a marketing page.`;
+      return `PAGE TYPE: DETAIL / SINGLE ITEM PAGE.
+IMPORTANT: This is a content detail page, NOT a marketing page. Do NOT design a landing page or hero section.
+Design for comprehensive information display: clear title hierarchy, metadata (date, author, category), main content area, sidebar with related info, action buttons, and related items section. Think blog post, product detail, or case study.`;
     case "SETTINGS":
-      return `This is a settings page. Design an organized preferences interface with grouped controls, custom toggles and inputs, and clear save actions. Not a marketing page.`;
+      return `PAGE TYPE: SETTINGS / PREFERENCES PAGE.
+IMPORTANT: This is a functional settings interface, NOT a marketing page. Do NOT design a landing page or hero section.
+Design an organized preferences UI: sidebar navigation for setting categories, grouped controls with labels and descriptions, custom toggles/switches, input fields, dropdown selects, danger zone for destructive actions, and save/cancel buttons. Think GitHub Settings or Stripe account page.`;
     case "AUTH":
-      return `This is an authentication page. Design a login/signup experience that feels trustworthy and minimal. Custom-styled form fields, not native browser inputs.`;
+      return `PAGE TYPE: AUTHENTICATION PAGE (Login / Register / Sign Up).
+IMPORTANT: This is a functional auth form, NOT a marketing page. Do NOT design a landing page or hero section.
+Design a focused authentication experience: centered or split-layout form with email/password fields (custom-styled, not native browser inputs), social login buttons (Google, GitHub, etc.), password visibility toggle, "forgot password" link, and a switch between login/signup. The form should be the primary focus — minimal distractions. Consider a decorative side panel or subtle background, but the form IS the page. Think Vercel login, Linear signup, or Stripe auth.`;
     case "CUSTOM":
     default:
-      return `Analyze the page name and content to determine the right layout. Don't default to a marketing landing page — match the layout to the page's actual purpose.`;
+      return `PAGE TYPE: CUSTOM — analyze the page name carefully.
+IMPORTANT: Do NOT default to a marketing landing page. Look at the page name and determine its actual purpose. If it's a functional page (registration, dashboard, settings, etc.), design the appropriate UI for that purpose. Only design a marketing/landing page if the name clearly indicates one (like "Home" or "Landing Page").`;
   }
+}
+
+/**
+ * Infer the page type from the page name/title.
+ */
+export function inferPageType(pageName: string): string {
+  const name = pageName.toLowerCase().trim();
+
+  // Auth pages
+  if (/\b(login|log.in|sign.?in|sign.?up|register|registration|forgot.?password|reset.?password|auth|verify|two.?factor|2fa|otp)\b/.test(name)) {
+    return "AUTH";
+  }
+
+  // Dashboard pages
+  if (/\b(dashboard|analytics|admin|overview|metrics|reports?|stats|insights)\b/.test(name)) {
+    return "DASHBOARD";
+  }
+
+  // Settings pages
+  if (/\b(settings?|preferences?|account|profile|billing|notifications?|configuration)\b/.test(name)) {
+    return "SETTINGS";
+  }
+
+  // Form pages
+  if (/\b(form|contact|feedback|survey|apply|application|checkout|onboarding|subscribe|book|booking|schedule|request|inquiry|enquiry|submit)\b/.test(name)) {
+    return "FORM";
+  }
+
+  // List pages
+  if (/\b(list|browse|catalog|catalogue|directory|archive|search|explore|products?|collection|inventory|members?|users?|team)\b/.test(name)) {
+    return "LIST";
+  }
+
+  // Detail pages
+  if (/\b(detail|view|single|article|blog.?post|profile|item|product.?page|case.?study|portfolio.?item|recipe)\b/.test(name)) {
+    return "DETAIL";
+  }
+
+  // Landing / marketing pages
+  if (/\b(landing|home|homepage|hero|about|pricing|features?|faq|testimonials?|careers?|jobs?|terms|privacy|404|error|coming.?soon|waitlist|launch)\b/.test(name)) {
+    return "LANDING";
+  }
+
+  // Default: let the AI figure it out from the name
+  return "CUSTOM";
 }
 
 // ── Core AI Functions (Gemini) ───────────────────────────────────

@@ -62,6 +62,7 @@ export async function POST(req: Request) {
       mode: "subscription",
       ui_mode: "embedded",
       line_items: [{ price: priceConfig.priceId, quantity: 1 }],
+      allow_promotion_codes: true,
       return_url: `${process.env.NEXT_PUBLIC_APP_URL}/checkout/return?session_id={CHECKOUT_SESSION_ID}`,
       metadata: {
         userId,

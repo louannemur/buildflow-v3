@@ -1,14 +1,14 @@
 "use client";
 
-import { useCallback } from "react";
-import { useSearchParams } from "next/navigation";
+import { useCallback, useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { loadStripe } from "@stripe/stripe-js";
 import {
   EmbeddedCheckoutProvider,
   EmbeddedCheckout,
 } from "@stripe/react-stripe-js";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const PLAN_DISPLAY: Record<
@@ -26,10 +26,28 @@ const stripePromise = loadStripe(
 
 export function CheckoutContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const plan = searchParams.get("plan") ?? "";
   const interval = searchParams.get("interval") ?? "monthly";
+  const [redirectingToPortal, setRedirectingToPortal] = useState(false);
 
   const planInfo = PLAN_DISPLAY[plan];
+
+  // Redirect existing subscribers to the billing portal
+  const redirectToPortal = useCallback(async () => {
+    setRedirectingToPortal(true);
+    try {
+      const res = await fetch("/api/stripe/portal", { method: "POST" });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+        return;
+      }
+    } catch {
+      // Fall through to pricing page
+    }
+    router.push("/pricing");
+  }, [router]);
 
   const fetchClientSecret = useCallback(async () => {
     const res = await fetch("/api/stripe/checkout", {
@@ -41,11 +59,31 @@ export function CheckoutContent() {
     const data = await res.json();
 
     if (!res.ok) {
+      // If the user already has a subscription, redirect to billing portal
+      if (res.status === 400 && data.error?.includes("active subscription")) {
+        redirectToPortal();
+        // Return a never-resolving promise to prevent Stripe from timing out
+        // while we redirect
+        return new Promise<string>(() => {});
+      }
       throw new Error(data.error ?? "Failed to create checkout session");
     }
 
     return data.clientSecret;
-  }, [plan, interval]);
+  }, [plan, interval, redirectToPortal]);
+
+  if (redirectingToPortal) {
+    return (
+      <div className="flex min-h-svh items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="mx-auto size-6 animate-spin text-muted-foreground" />
+          <p className="mt-3 text-sm text-muted-foreground">
+            Redirecting to subscription management...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (!planInfo) {
     return (
