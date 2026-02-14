@@ -88,13 +88,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return true;
     },
 
-    async jwt({ token, user, trigger }) {
+    async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
       }
 
-      // Look up plan on initial sign-in or when session is updated
-      if ((user || trigger === "update") && token.id) {
+      // Always read the plan from DB so it stays fresh after upgrades
+      if (token.id) {
         const sub = await db.query.subscriptions.findFirst({
           where: eq(subscriptions.userId, token.id as string),
           columns: { plan: true },
