@@ -1,7 +1,16 @@
 import { eq, and, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { usage } from "@/lib/db/schema";
+import { usage, subscriptions } from "@/lib/db/schema";
 import { getPlanLimits, type Plan } from "@/lib/plan-limits";
+
+/** Read the user's current plan directly from the DB (avoids stale JWT). */
+export async function getUserPlan(userId: string): Promise<Plan> {
+  const sub = await db.query.subscriptions.findFirst({
+    where: eq(subscriptions.userId, userId),
+    columns: { plan: true },
+  });
+  return (sub?.plan ?? "free") as Plan;
+}
 
 export type UsageAction = "ai_generation" | "design_generation";
 

@@ -4,8 +4,8 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { designs } from "@/lib/db/schema";
 import { createDesignSchema } from "@/lib/validators/design";
-import { getPlanLimits, type Plan } from "@/lib/plan-limits";
-import { incrementUsage } from "@/lib/usage";
+import { getPlanLimits } from "@/lib/plan-limits";
+import { getUserPlan, incrementUsage } from "@/lib/usage";
 
 export async function GET(req: Request) {
   try {
@@ -54,7 +54,7 @@ export async function GET(req: Request) {
       .from(designs)
       .where(and(eq(designs.userId, userId), eq(designs.isStandalone, true)));
 
-    const plan = (session.user.plan ?? "free") as Plan;
+    const plan = await getUserPlan(userId);
     const limits = getPlanLimits(plan);
 
     return NextResponse.json(
@@ -87,7 +87,7 @@ export async function POST(req: Request) {
     }
 
     const userId = session.user.id;
-    const plan = (session.user.plan ?? "free") as Plan;
+    const plan = await getUserPlan(userId);
     const limits = getPlanLimits(plan);
 
     // Check design limit (only applies to free plan)

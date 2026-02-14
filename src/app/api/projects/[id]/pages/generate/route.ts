@@ -4,8 +4,7 @@ import { auth } from "@/lib/auth";
 import { anthropic } from "@/lib/ai";
 import { db } from "@/lib/db";
 import { features, userFlows, pages, projects } from "@/lib/db/schema";
-import { checkUsage, incrementUsage } from "@/lib/usage";
-import type { Plan } from "@/lib/plan-limits";
+import { getUserPlan, checkUsage, incrementUsage } from "@/lib/usage";
 
 const SYSTEM_PROMPT = `You are a product designer. Given the project info, features, and user flows, determine all the pages this application needs.
 
@@ -44,7 +43,7 @@ export async function POST(
     }
 
     // Check AI usage limits
-    const plan = (session.user.plan ?? "free") as Plan;
+    const plan = await getUserPlan(userId);
     const usageCheck = await checkUsage(userId, plan, "ai_generation");
     if (!usageCheck.allowed) {
       return NextResponse.json(

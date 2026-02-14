@@ -2,9 +2,8 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { designs, projects, pages, subscriptions } from "@/lib/db/schema";
-import { checkUsage, incrementUsage } from "@/lib/usage";
-import type { Plan } from "@/lib/plan-limits";
+import { designs, projects, pages } from "@/lib/db/schema";
+import { getUserPlan, checkUsage, incrementUsage } from "@/lib/usage";
 import {
   generateDesign,
   editDesign,
@@ -89,11 +88,7 @@ export async function POST(req: Request) {
   }
 
   const userId = session.user.id;
-  const sub = await db.query.subscriptions.findFirst({
-    where: eq(subscriptions.userId, userId),
-    columns: { plan: true },
-  });
-  const plan = (sub?.plan ?? "free") as Plan;
+  const plan = await getUserPlan(userId);
 
   const body = await req.json();
   if (!body || typeof body.action !== "string") {

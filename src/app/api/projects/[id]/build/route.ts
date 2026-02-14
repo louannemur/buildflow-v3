@@ -13,8 +13,7 @@ import {
   buildOutputs,
   type BuildFile,
 } from "@/lib/db/schema";
-import { checkUsage, incrementUsage } from "@/lib/usage";
-import type { Plan } from "@/lib/plan-limits";
+import { getUserPlan, checkUsage, incrementUsage } from "@/lib/usage";
 import { z } from "zod";
 
 /* ─── Validation ─────────────────────────────────────────────────────────── */
@@ -193,7 +192,7 @@ export async function POST(
 
     const { id: projectId } = await params;
     const userId = session.user.id;
-    const plan = (session.user.plan ?? "free") as Plan;
+    const plan = await getUserPlan(userId);
 
     // Tier check: Pro or Founding only
     if (plan === "free" || plan === "studio") {

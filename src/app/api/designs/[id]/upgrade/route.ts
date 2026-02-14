@@ -3,7 +3,8 @@ import { eq, and, count } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { designs, projects, pages } from "@/lib/db/schema";
-import { getPlanLimits, type Plan } from "@/lib/plan-limits";
+import { getPlanLimits } from "@/lib/plan-limits";
+import { getUserPlan } from "@/lib/usage";
 
 export async function POST(
   req: Request,
@@ -17,7 +18,7 @@ export async function POST(
 
     const { id } = await params;
     const userId = session.user.id;
-    const plan = (session.user.plan ?? "free") as Plan;
+    const plan = await getUserPlan(userId);
     const limits = getPlanLimits(plan);
 
     // Optional overrides from body
