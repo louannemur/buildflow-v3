@@ -75,9 +75,9 @@ const PLAN_LABELS: Record<string, string> = {
 
 const PLAN_PRICES: Record<string, string> = {
   free: "$0",
-  studio: "$19",
-  pro: "$49",
-  founding: "$49",
+  studio: "$4.99",
+  pro: "$12.99",
+  founding: "$6.99",
 };
 
 function formatLimit(value: number): string {
