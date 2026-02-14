@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { designs, projects, pages } from "@/lib/db/schema";
+import { designs, projects, pages, subscriptions } from "@/lib/db/schema";
 import { checkUsage, incrementUsage } from "@/lib/usage";
 import type { Plan } from "@/lib/plan-limits";
 import {
@@ -86,7 +86,11 @@ export async function POST(req: Request) {
   }
 
   const userId = session.user.id;
-  const plan = (session.user.plan ?? "free") as Plan;
+  const sub = await db.query.subscriptions.findFirst({
+    where: eq(subscriptions.userId, userId),
+    columns: { plan: true },
+  });
+  const plan = (sub?.plan ?? "free") as Plan;
 
   const body = await req.json();
   const { action, designId, ...data } = body;
