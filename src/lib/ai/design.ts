@@ -1,0 +1,457 @@
+import { anthropic } from "@/lib/ai";
+import { DESIGN_ARCHETYPES } from "@/lib/design/design-archetypes";
+import {
+  extractStyleTokens,
+  formatTokensForPrompt,
+} from "@/lib/design/style-extractor";
+
+// ── Prompt Constants ─────────────────────────────────────────────
+
+const DESIGN_SYSTEM_PROMPT = `You are a world-class web designer who has won multiple Awwwards and FWA awards. You design sites featured on godly.website. You have ONE job: create a design so striking that someone screenshots it and shares it. Every design you make should look like a human designer spent days on it — not something an AI generated in seconds.
+
+THE ONE IDEA RULE: Before writing any code, decide on ONE dominant visual concept for the entire page. Not three, not five — ONE. Examples: "typography-led with a single massive serif headline," or "dark with a single glowing accent color," or "warm cream editorial with asymmetric photo layout." Every element must serve this single concept. If an element doesn't reinforce the concept, delete it.
+
+Output: JSX/Tailwind in a single code block. CSS in style attributes or Tailwind classes. Brief commentary before and after code only. Don't mention Tailwind, React, or tokens.
+
+[Typography — the #1 differentiator]:
+Load ONE Google Font via @import that perfectly matches the project's personality. This is the most important decision — the wrong font ruins everything. Never default to Inter.
+- Fintech/dev tools → Space Grotesk, JetBrains Mono, IBM Plex Sans
+- Creative/agency → Syne, Clash Display, Cabinet Grotesk
+- Editorial/content → Playfair Display, Lora, Newsreader, DM Serif Display
+- Lifestyle/wellness → DM Sans, Outfit, Plus Jakarta Sans
+- Luxury/fashion → Cormorant Garamond, Bodoni Moda
+- Playful/consumer → Nunito, Quicksand, Fredoka
+
+Font weight creates hierarchy — don't use bold everywhere.
+SIZE HIERARCHY (follow this exactly):
+- Hero headline: text-5xl to text-7xl, font-light or font-normal, leading-[1.05], tracking-tight
+- Section headings (h2): text-2xl to text-3xl max
+- Card/feature titles (h3): text-lg max — use font-semibold for hierarchy, not bigger sizes
+- Hero subtitle/tagline: text-base to text-lg max
+- Body paragraphs & descriptions: text-sm or text-base ONLY. NEVER text-lg or larger for running text
+- Card descriptions & feature text: text-sm
+- Labels/meta: text-xs tracking-[0.15em] uppercase
+The gap between headline and body should feel dramatic — that IS the hierarchy. Don't fill the gap with medium-sized text everywhere.
+
+[Color — commit to a palette, not a rainbow]:
+Pick a background strategy and commit:
+- Light mode: warm off-whites (#faf9f6, #f7f5f2, #fefdfb) — NEVER use pure white (#ffffff)
+- Dark mode: rich darks (#0a0a0a, #0f172a, #1a0a2e) — never generic gray (#1f2937)
+Pick ONE accent color. Use it on exactly 2-3 elements (primary CTA, one highlight, maybe a subtle border). Everything else is the neutral palette. Two accent colors = amateur.
+
+[Layout — break the grid, but with purpose]:
+Avoid the "centered stack of sections" pattern. Real sites use tension:
+- Hero: asymmetric split (text left, visual right) or full-bleed with text pinned to one edge
+- Mix max-w-5xl centered sections with full-bleed sections
+- At least one section should use asymmetric columns: grid-cols-[1.4fr_1fr] or grid-cols-[2fr_1fr]
+- Vary section padding: py-16, py-24, py-32, py-40. Never the same twice in a row
+- Left-align body text. Center-align only standalone headlines or CTAs
+
+[Motion — subtle, not showy]:
+Framer Motion for: scroll reveals (useInView, once: true), hover states (scale: 1.02, not 1.1), staggered children (staggerChildren: 0.08). Use transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }} — never "linear" or default ease. Less is more — not everything needs to animate.
+
+[3D — only when it's THE concept]:
+Three.js (window.THREE) is available. ONLY use it when 3D IS the one visual concept — not as decoration on top of an already-busy design. When used: useRef + useEffect pattern, Scene + PerspectiveCamera + WebGLRenderer, requestAnimationFrame loop, cleanup on unmount. Good: a single ambient particle field behind a minimal hero. Bad: particles + gradient text + badge chip + glassmorphism cards all in one page. Import as: import * as THREE from 'three'.
+
+[Content — sound human]:
+Write copy like a real person for this specific product. The tone must match: dev tools are direct and technical, wellness apps are warm and personal. NEVER use: "Welcome to," "Best-in-class," "Seamless," "Get Started," "Revolutionize," "Unlock the power of," "Your journey starts here." These are AI tells. Real copy is specific and surprising.
+
+Page names (Home, About, Contact) are route names, NOT topics. A "Home" page is the homepage for the project, not about houses.
+
+[Icons]: Use <iconify-icon> web components. Pick ONE icon set per design (ph: for Phosphor, lucide: for Lucide, tabler: for Tabler). Never use inline SVG.
+
+[Images]: For photos, use https://picsum.photos/{width}/{height} as placeholder URLs — they will be automatically replaced with contextual images. Write DESCRIPTIVE alt attributes that describe the intended image (e.g., alt="team collaborating at a whiteboard" not alt="image"). For avatars use https://i.pravatar.cc/{size}. CSS gradients and colored shapes are PREFERRED over placeholder photos — they look better and load faster. Only use images when the design concept truly calls for photography.
+
+[Output]: Complete, self-contained React component. Start with 'use client', import React and framer-motion, export default function. KEEP IT UNDER 250 LINES. Use map() over repeated JSX. Tailwind classes only — no CSS modules.
+
+[HARD RULES — violating these means the design is bad]:
+1. ONE visual concept per page. If you used gradient text AND glassmorphism AND a badge chip AND a ticker bar AND grid-line backgrounds, you failed. Pick ONE or TWO max.
+2. No dark navy gradient backgrounds (#0f172a → #1e293b) unless the archetype specifically calls for it. This is the #1 AI tell.
+3. No generic "floating cards" scattered around the hero. This looks fake.
+4. No badge chip above EVERY headline. Use it once per page or not at all.
+5. Maximum 3 sections visible on the first page. Don't cram the entire site above the fold.
+6. Body text is ALWAYS left-aligned. Never center long paragraphs.
+7. Navigation should be minimal — 3-4 links max. No mega-menus.
+8. CTA buttons need real, specific text. Not "Get Started" — say what actually happens: "Try free for 14 days," "See the demo," "Create your first project."
+9. Don't put a number/stat in every section. One stat section per page max.
+10. White space is a feature, not a bug. Sections with generous py-32 or py-40 and minimal content feel intentional and premium. Cramming content into every pixel feels cheap.
+11. Body text, descriptions, and card content are NEVER larger than text-base (1rem/16px). The ONLY exception is a single hero subtitle which may be text-lg. If you used text-xl or text-2xl on a paragraph or description, you failed.
+12. Card/feature titles max out at text-lg. Use font-semibold for hierarchy, not bigger sizes. Section headings (h2) max out at text-3xl. The hero headline is the ONLY text that gets to be huge.`;
+
+const EDIT_DESIGN_PROMPT = `You are editing an existing design. Focus on iterative improvements while maintaining the existing design structure.
+
+CRITICAL: Change as little as possible. Keep the original design structure, code, scripts, styles, fonts, colors, and layout as much as possible. Only change what is specifically requested by the user.
+
+If the user's request is ambiguous, err on the side of minimal changes. Preserve all animations, typography choices, color palettes, and layout decisions unless explicitly asked to change them. If the existing design has oversized body text (text-lg, text-xl, or text-2xl on paragraphs or card descriptions), fix it — body text should be text-sm or text-base.
+
+Return the COMPLETE updated React component (not just the changed parts). The output must be a full, working component.`;
+
+const ELEMENT_MODIFY_PROMPT = `You are modifying a selected HTML element based on user requests. Think through the changes needed, considering design consistency, accessibility, and best practices.
+
+TASK: Modify the selected element based on the user's request and return ONLY the modified element with its EXACT data-element-id preserved. Only code in JSX/Tailwind. Any CSS styles should be in the style attribute. Make sure to always respect the structure and close tags properly. Use <iconify-icon> for icons.
+
+Typography rules: Be precise with font weights, going one level lighter than standard. Titles over 20px get tight letter spacing. Avoid px or em for font sizing, minimum size is text-xs. Everything must be responsive. Content text (paragraphs, descriptions, card text) must be text-sm or text-base — never text-lg or larger. Only hero headlines get large sizes.`;
+
+const ADD_SECTION_PROMPT = `You are adding new content after a selected element. Think through the design, structure, and integration with the existing layout.
+
+TASK: Generate new JSX content to be inserted AFTER the specified element based on the user's request. Match the existing design's typography, colors, spacing, and animation patterns. The new section should feel like a natural extension of the existing design.
+
+Use the same fonts, color palette, and Framer Motion animation patterns as the existing page. Maintain consistent spacing (py-24 or py-32 sections). Body paragraphs and descriptions must be text-sm or text-base. Card titles max at text-lg.`;
+
+const CREATIVE_SEEDS = [
+  "Make typography the ONLY visual element. No images, no icons, no decorative shapes. The entire design is type, color, and whitespace. Let the font do all the talking.",
+  "Use ONE full-bleed hero image as the dominant visual. All other sections are text-only on clean backgrounds. The photo IS the design.",
+  "Use an asymmetric two-column layout for EVERY section (grid-cols-[2fr_1fr] or grid-cols-[1fr_1.4fr]). Nothing centered. Everything offset. Asymmetry creates tension.",
+  "The entire page uses ONLY black, white, and one accent color. No grays, no gradients. Three colors total. Constraint forces creativity.",
+  "Make the hero just ONE sentence — text-6xl or larger, left-aligned, with 120px+ of padding around it. Then a single CTA below. Maximum impact through minimum content.",
+  "Use a serif font for everything. Headlines, body, nav, buttons — all serif. Commit fully. This forces an editorial, literary feel that stands out from the sans-serif web.",
+  "The entire page has a dark background (#0a0a0a). No light sections at all. All text is white or muted gray. Accent color appears on exactly 2 elements.",
+  "Design around generous vertical rhythm — py-32 to py-48 on every section. The page should feel like it takes a deep breath between each section. Emptiness is the feature.",
+  "Use a warm cream/paper background (#faf9f6) for the entire page with no dark sections. Everything is warm neutrals. The design feels handmade and human.",
+  "Let the content layout tell a story — start with a single large statement, then reveal more detail section by section, building tension like a narrative. No random card grids.",
+  "The hero has NO headline at all — just a product screenshot/visual filling 70%+ of the viewport with a small text caption below it. Show, don't tell.",
+  "Use a monospace font (JetBrains Mono or IBM Plex Mono) as the primary font for everything. This creates a raw, technical, honest aesthetic.",
+  "Design a split-screen hero: left half is a solid color with text, right half is a full-bleed image. The two halves create visual tension.",
+  "Every section uses left-aligned text with a max-w-xl container — nothing wider. The right side of the page is intentionally empty. Restraint over filling space.",
+  "Use a Three.js subtle particle field (200-400 small white points, slow drift) as the ONLY decorative element on the entire page. Everything else is clean typography on a dark bg. The particles are the personality.",
+];
+
+// ── Helper Functions ─────────────────────────────────────────────
+
+/**
+ * Extract code from an AI response that may contain markdown code blocks.
+ */
+export function extractCodeFromResponse(text: string): string {
+  // Try to extract from ```jsx or ```tsx or ``` code blocks
+  const codeBlockMatch = text.match(
+    /```(?:jsx|tsx|javascript|typescript|react)?\s*\n([\s\S]*?)```/
+  );
+  if (codeBlockMatch) {
+    return codeBlockMatch[1].trim();
+  }
+
+  // If the response starts with 'use client' or 'import', treat it as raw code
+  const trimmed = text.trim();
+  if (
+    trimmed.startsWith("'use client'") ||
+    trimmed.startsWith('"use client"') ||
+    trimmed.startsWith("import ")
+  ) {
+    return trimmed;
+  }
+
+  // Return as-is if no code block found
+  return trimmed;
+}
+
+/**
+ * Pick N random creative seeds from the list.
+ */
+export function pickRandomSeeds(count: number = 2): string[] {
+  const shuffled = [...CREATIVE_SEEDS].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, count);
+}
+
+/**
+ * Get layout/design guidance based on the page type.
+ */
+export function getPageTypeGuidance(pageType: string): string {
+  const type = pageType.toUpperCase();
+  switch (type) {
+    case "LANDING":
+      return `This is a marketing landing page. Focus on conversion — hero, social proof, benefits, and a strong closing CTA. Make the layout feel editorial, not templated.`;
+    case "DASHBOARD":
+      return `This is an application dashboard. Design a functional, data-rich interface with navigation, metrics, and content areas. This is NOT a marketing page — no hero sections, no CTAs. Think app UI, not website.`;
+    case "FORM":
+      return `This is a form page. Design a focused, distraction-free form experience with custom-styled inputs (never native browser elements), clear grouping, and validation states. Not a marketing page.`;
+    case "LIST":
+      return `This is a list/collection page. Design a browsable view with filtering, search, and well-structured item cards. Focus on information density and scannability. Not a marketing page.`;
+    case "DETAIL":
+      return `This is a detail page for viewing a single item. Design for comprehensive information display with clear hierarchy, metadata, actions, and related content. Not a marketing page.`;
+    case "SETTINGS":
+      return `This is a settings page. Design an organized preferences interface with grouped controls, custom toggles and inputs, and clear save actions. Not a marketing page.`;
+    case "AUTH":
+      return `This is an authentication page. Design a login/signup experience that feels trustworthy and minimal. Custom-styled form fields, not native browser inputs.`;
+    case "CUSTOM":
+    default:
+      return `Analyze the page name and content to determine the right layout. Don't default to a marketing landing page — match the layout to the page's actual purpose.`;
+  }
+}
+
+// ── Core AI Functions ────────────────────────────────────────────
+
+interface GenerateDesignParams {
+  projectName: string;
+  projectDescription: string;
+  pageName: string;
+  pageType: string;
+  sections: string[];
+  styleGuideCode?: string;
+  archetype?: string;
+  components?: string[];
+}
+
+/**
+ * Generate a new design using Claude.
+ */
+export async function generateDesign(
+  params: GenerateDesignParams
+): Promise<string> {
+  const {
+    projectName,
+    projectDescription,
+    pageName,
+    pageType,
+    sections,
+    styleGuideCode,
+    archetype,
+    components,
+  } = params;
+
+  const pageGuidance = getPageTypeGuidance(pageType);
+
+  // Build style token context if a style guide is provided
+  let styleTokenContext = "";
+  if (styleGuideCode) {
+    const tokens = extractStyleTokens(styleGuideCode);
+    styleTokenContext = `\n\n${formatTokensForPrompt(tokens)}\n\nYou MUST match these tokens exactly. Use the same font, colors, spacing, and radius. The new page should look like it belongs to the same site as the style guide.`;
+  }
+
+  // Archetype directive
+  let archetypeDirective = "";
+  if (archetype && archetype in DESIGN_ARCHETYPES) {
+    const info = DESIGN_ARCHETYPES[archetype as keyof typeof DESIGN_ARCHETYPES];
+    archetypeDirective = `\n\nDESIGN ARCHETYPE — ${info.label}:\n${info.promptDirective}`;
+  }
+
+  // Creative seeds (only when no style guide — style guide means consistency)
+  let creativeSeedContext = "";
+  if (!styleGuideCode) {
+    const seeds = pickRandomSeeds(2);
+    creativeSeedContext = `\n\nCREATIVE DIRECTION — Pick ONE of these approaches (or ignore both and surprise me with something better):\n${seeds.map((s, i) => `${i + 1}. ${s}`).join("\n")}`;
+  }
+
+  // Components context
+  let componentsContext = "";
+  if (components && components.length > 0) {
+    componentsContext = `\n\nAVAILABLE COMPONENTS — You may reference these existing components in your design:\n${components.join("\n")}`;
+  }
+
+  const systemPrompt = `${DESIGN_SYSTEM_PROMPT}${archetypeDirective}${styleTokenContext}`;
+
+  const userMessage = `Design a ${pageType} page for "${projectName}".
+
+Project: ${projectDescription}
+Page: "${pageName}" (${pageType})
+${pageGuidance}
+
+Sections to include: ${sections.join(", ")}
+${creativeSeedContext}${componentsContext}
+
+Remember: ONE visual concept. Make it award-winning. Output a complete React component in a single code block.`;
+
+  const temperature = styleGuideCode ? 0.7 : 0.95;
+
+  const response = await anthropic.messages.create({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 16384,
+    system: systemPrompt,
+    messages: [{ role: "user", content: userMessage }],
+    temperature,
+  });
+
+  const text =
+    response.content[0].type === "text" ? response.content[0].text : "";
+  return extractCodeFromResponse(text);
+}
+
+// ── Edit Design ──────────────────────────────────────────────────
+
+interface EditDesignParams {
+  projectName: string;
+  projectDescription: string;
+  pageName: string;
+  pageType: string;
+  previousHtml: string;
+  editRequest: string;
+  styleGuideCode?: string;
+  conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
+}
+
+/**
+ * Edit an existing design based on user instructions.
+ */
+export async function editDesign(params: EditDesignParams): Promise<string> {
+  const {
+    projectName,
+    projectDescription,
+    pageName,
+    pageType,
+    previousHtml,
+    editRequest,
+    styleGuideCode,
+    conversationHistory,
+  } = params;
+
+  const pageGuidance = getPageTypeGuidance(pageType);
+
+  let styleTokenContext = "";
+  if (styleGuideCode) {
+    const tokens = extractStyleTokens(styleGuideCode);
+    styleTokenContext = `\n\n${formatTokensForPrompt(tokens)}\n\nMaintain consistency with these design tokens.`;
+  }
+
+  const systemPrompt = `${DESIGN_SYSTEM_PROMPT}\n\n${EDIT_DESIGN_PROMPT}${styleTokenContext}`;
+
+  // Build messages array with optional conversation history
+  const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
+
+  if (conversationHistory && conversationHistory.length > 0) {
+    messages.push(...conversationHistory);
+  }
+
+  messages.push({
+    role: "user",
+    content: `Project: "${projectName}" — ${projectDescription}
+Page: "${pageName}" (${pageType})
+${pageGuidance}
+
+Current design code:
+\`\`\`jsx
+${previousHtml}
+\`\`\`
+
+Edit request: ${editRequest}
+
+Return the COMPLETE updated React component with ALL the changes applied. Do not omit any sections.`,
+  });
+
+  const response = await anthropic.messages.create({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 16384,
+    system: systemPrompt,
+    messages,
+    temperature: 0.3,
+  });
+
+  const text =
+    response.content[0].type === "text" ? response.content[0].text : "";
+  return extractCodeFromResponse(text);
+}
+
+// ── Modify Element ───────────────────────────────────────────────
+
+interface ModifyElementParams {
+  elementHtml: string;
+  elementId: string;
+  elementTag: string;
+  elementClasses: string;
+  fullPageHtml: string;
+  userRequest: string;
+}
+
+/**
+ * Modify a specific element within a design.
+ */
+export async function modifyElement(
+  params: ModifyElementParams
+): Promise<string> {
+  const {
+    elementHtml,
+    elementId,
+    elementTag,
+    elementClasses,
+    fullPageHtml,
+    userRequest,
+  } = params;
+
+  const systemPrompt = ELEMENT_MODIFY_PROMPT;
+
+  const userMessage = `Selected element:
+- Tag: <${elementTag}>
+- ID: ${elementId}
+- Classes: ${elementClasses}
+- Current HTML:
+\`\`\`jsx
+${elementHtml}
+\`\`\`
+
+Full page context (for reference only — do NOT return the full page):
+\`\`\`jsx
+${fullPageHtml}
+\`\`\`
+
+User request: ${userRequest}
+
+Return ONLY the modified element JSX with its exact data-element-id="${elementId}" preserved. Nothing else.`;
+
+  const response = await anthropic.messages.create({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 8192,
+    system: systemPrompt,
+    messages: [{ role: "user", content: userMessage }],
+    temperature: 0.3,
+  });
+
+  const text =
+    response.content[0].type === "text" ? response.content[0].text : "";
+  return extractCodeFromResponse(text);
+}
+
+// ── Add Section ──────────────────────────────────────────────────
+
+interface AddSectionParams {
+  projectName: string;
+  pageName: string;
+  afterElementHtml: string;
+  afterElementTag: string;
+  fullPageHtml: string;
+  userRequest: string;
+}
+
+/**
+ * Add a new section after a specified element.
+ */
+export async function addSection(params: AddSectionParams): Promise<string> {
+  const {
+    projectName,
+    pageName,
+    afterElementHtml,
+    afterElementTag,
+    fullPageHtml,
+    userRequest,
+  } = params;
+
+  const systemPrompt = ADD_SECTION_PROMPT;
+
+  const userMessage = `Project: "${projectName}"
+Page: "${pageName}"
+
+Insert new content AFTER this element:
+- Tag: <${afterElementTag}>
+- HTML:
+\`\`\`jsx
+${afterElementHtml}
+\`\`\`
+
+Full page context (for design matching — do NOT return the full page):
+\`\`\`jsx
+${fullPageHtml}
+\`\`\`
+
+User request: ${userRequest}
+
+Return ONLY the new section JSX to be inserted. Match the existing design language exactly.`;
+
+  const response = await anthropic.messages.create({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 8192,
+    system: systemPrompt,
+    messages: [{ role: "user", content: userMessage }],
+    temperature: 0.5,
+  });
+
+  const text =
+    response.content[0].type === "text" ? response.content[0].text : "";
+  return extractCodeFromResponse(text);
+}
