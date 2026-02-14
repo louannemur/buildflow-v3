@@ -73,3 +73,93 @@ export function injectBfIds(code: string): InjectionResult {
 export function stripBfIds(code: string): string {
   return code.replace(/\s*data-bf-id="[^"]*"/g, '');
 }
+
+/**
+ * Generate a random 8-character alphanumeric bf-id.
+ * Format: bf_XXXXXXXX
+ */
+function generateBfId(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let result = 'bf_';
+  for (let i = 0; i < 8; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+/**
+ * Ensure all visible HTML elements have a data-bf-id attribute.
+ *
+ * - Finds all opening HTML tags that do NOT already have data-bf-id
+ * - Skips non-visual tags: <html>, <head>, <meta>, <link>, <script>, <style>, <title>
+ * - Generates unique random bf_XXXXXXXX IDs for each element
+ * - Deduplicates any collisions (if an AI reused an ID)
+ */
+export function ensureBfIds(html: string): string {
+  const nonVisualTags = new Set(['html', 'head', 'meta', 'link', 'script', 'style', 'title']);
+  const usedIds = new Set<string>();
+
+  // Collect all existing data-bf-id values so we can detect collisions
+  const existingIdPattern = /data-bf-id="([^"]*)"/g;
+  let existingMatch;
+  while ((existingMatch = existingIdPattern.exec(html)) !== null) {
+    usedIds.add(existingMatch[1]);
+  }
+
+  // Same tag pattern as injectBfIds: opening tags starting with a letter
+  const tagPattern = /(<)([a-zA-Z][a-zA-Z0-9.]*)([\s/>])/g;
+
+  let result = html.replace(tagPattern, (match, openBracket, tagName, afterTag, offset) => {
+    // Skip closing tags (look back for </)
+    const before = html.slice(Math.max(0, offset - 2), offset);
+    if (before.endsWith('</') || before.endsWith('</ ')) return match;
+
+    // Skip fragments
+    if (tagName === '') return match;
+
+    // Skip non-visual tags
+    if (nonVisualTags.has(tagName.toLowerCase())) return match;
+
+    // Skip if already has data-bf-id
+    const restOfTag = html.slice(offset, offset + 500);
+    if (restOfTag.match(/^<[a-zA-Z][a-zA-Z0-9.]*[\s][^>]*data-bf-id/)) return match;
+
+    // Generate a unique ID, avoiding collisions
+    let bfId = generateBfId();
+    while (usedIds.has(bfId)) {
+      bfId = generateBfId();
+    }
+    usedIds.add(bfId);
+
+    // Insert data-bf-id after the tag name
+    return `${openBracket}${tagName} data-bf-id="${bfId}"${afterTag}`;
+  });
+
+  // Deduplicate: if any data-bf-id values appear more than once, reassign duplicates
+  const idCounts = new Map<string, number>();
+  const dedupPattern = /data-bf-id="([^"]*)"/g;
+  let dedupMatch;
+  while ((dedupMatch = dedupPattern.exec(result)) !== null) {
+    const id = dedupMatch[1];
+    idCounts.set(id, (idCounts.get(id) || 0) + 1);
+  }
+
+  // For any duplicated IDs, replace all but the first occurrence
+  for (const [id, count] of idCounts) {
+    if (count > 1) {
+      let seen = 0;
+      result = result.replace(new RegExp(`data-bf-id="${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`, 'g'), (m) => {
+        seen++;
+        if (seen === 1) return m; // keep the first occurrence
+        let newId = generateBfId();
+        while (usedIds.has(newId)) {
+          newId = generateBfId();
+        }
+        usedIds.add(newId);
+        return `data-bf-id="${newId}"`;
+      });
+    }
+  }
+
+  return result;
+}

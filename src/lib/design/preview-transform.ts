@@ -1,9 +1,51 @@
 /**
- * Transforms React code for browser preview rendering in an iframe
+ * Transforms code for browser preview rendering in an iframe.
+ * Supports both legacy React/JSX (via Babel) and new HTML+Tailwind (direct).
  */
 
 import { injectBfIds } from './inject-bf-ids';
+import { ensureBfIds } from './inject-bf-ids';
 import { getIframeBridgeScript } from './iframe-bridge';
+
+/**
+ * Detect if source is a complete HTML document (vs React/JSX code).
+ */
+export function isHtmlDocument(source: string): boolean {
+  const trimmed = source.trim();
+  return trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html');
+}
+
+/**
+ * Prepare a complete HTML document for preview in an iframe.
+ * Much simpler than generatePreviewHtml — no Babel/React needed.
+ */
+export function prepareHtmlForPreview(
+  htmlSource: string,
+  options: PreviewOptions = {},
+): string {
+  const { enableBridge = false } = options;
+
+  let html = htmlSource;
+
+  // Ensure all elements have bf-ids
+  if (enableBridge) {
+    html = ensureBfIds(html);
+  }
+
+  // Inject the bridge script before </body>
+  if (enableBridge) {
+    const bridgeScript = `<script>${getIframeBridgeScript()}</script>`;
+    const bodyCloseIndex = html.lastIndexOf('</body>');
+    if (bodyCloseIndex !== -1) {
+      html = html.slice(0, bodyCloseIndex) + bridgeScript + html.slice(bodyCloseIndex);
+    } else {
+      // No </body> tag, append at end
+      html += bridgeScript;
+    }
+  }
+
+  return html;
+}
 
 /**
  * Transform generated React code for preview rendering

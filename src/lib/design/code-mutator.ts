@@ -255,6 +255,13 @@ function skipStringOrTemplate(code: string, i: number): number {
  * Extract the className value from an opening tag string.
  */
 function extractClassName(openingTag: string): string {
+  // HTML: class="..."
+  const htmlClassMatch = openingTag.match(/\bclass\s*=\s*"([^"]*)"/);
+  if (htmlClassMatch) return htmlClassMatch[1];
+
+  const htmlClassSingleMatch = openingTag.match(/\bclass\s*=\s*'([^']*)'/);
+  if (htmlClassSingleMatch) return htmlClassSingleMatch[1];
+
   // Match className="..." or className='...'
   const staticMatch = openingTag.match(/className\s*=\s*"([^"]*)"/);
   if (staticMatch) return staticMatch[1];
@@ -321,10 +328,28 @@ export function updateElementClasses(code: string, bfId: string, newClasses: str
   }
 
   if (!replaced) {
-    // No className exists — add one after data-bf-id
+    // HTML class="..."
+    newTag = tagContent.replace(/\bclass\s*=\s*"[^"]*"/, () => {
+      replaced = true;
+      return `class="${newClasses}"`;
+    });
+  }
+
+  if (!replaced) {
+    // HTML class='...'
+    newTag = tagContent.replace(/\bclass\s*=\s*'[^']*'/, () => {
+      replaced = true;
+      return `class="${newClasses}"`;
+    });
+  }
+
+  if (!replaced) {
+    // No class attribute exists — add one after data-bf-id
+    const isHtml = !tagContent.includes('className=');
+    const attrName = isHtml ? 'class' : 'className';
     newTag = tagContent.replace(
       `data-bf-id="${bfId}"`,
-      `data-bf-id="${bfId}" className="${newClasses}"`
+      `data-bf-id="${bfId}" ${attrName}="${newClasses}"`
     );
     replaced = true;
   }

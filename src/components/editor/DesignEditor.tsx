@@ -10,12 +10,15 @@ import { Toolbar } from "./Toolbar";
 import { PromptBar } from "./PromptBar";
 import { PromptChat } from "./PromptChat";
 import { StylePickerModal } from "./StylePickerModal";
+import type { GenerateConfig } from "./StylePickerModal";
 import { SelectionOverlay } from "./SelectionOverlay";
+import { StreamingIndicator } from "./StreamingOverlay";
 import { ComponentLibrary } from "./ComponentLibrary";
 import { useAIGenerate } from "@/hooks/useAIGenerate";
 import { useChatHistoryStore } from "@/stores/chat-history-store";
 import { UpgradeModal } from "@/components/features/upgrade-modal";
 import { COMPONENT_SECTIONS } from "@/lib/design/component-library";
+import { extractHtmlFromStream } from "@/lib/ai/extract-code";
 
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
@@ -72,6 +75,7 @@ export function DesignEditor({
   const deleteElement = useEditorStore((s) => s.deleteElement);
   const undo = useEditorStore((s) => s.undo);
   const redo = useEditorStore((s) => s.redo);
+  const setStreamingToIframe = useEditorStore((s) => s.setStreamingToIframe);
 
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -79,14 +83,21 @@ export function DesignEditor({
   const [stylePickerOpen, setStylePickerOpen] = useState(false);
   const [selectedComponentIds, setSelectedComponentIds] = useState<string[]>([]);
 
+  // Refs for live iframe streaming
+  const streamHtmlStartedRef = useRef(false);
+  const streamPrevHtmlLenRef = useRef(0);
+
   // AI generation
   const {
     isGenerating,
-    editDesign,
-    modifyElement,
-    addSectionAfter,
+    editDesignStream,
+    modifyElementStream,
+    addSectionAfterStream,
     showUpgradeModal,
     setShowUpgradeModal,
+    streamPhase,
+    cancelStream,
+    setOnStreamChunk,
   } = useAIGenerate();
 
   const { addMessage, getHistory } = useChatHistoryStore();
@@ -115,25 +126,156 @@ export function DesignEditor({
     }
   }, [initialCode]);
 
+  // ─── Live iframe streaming ──────────────────────────────────────────
+
+  useEffect(() => {
+    setOnStreamChunk((chunk: string, accumulated: string) => {
+      const iframe = iframeRef.current;
+      if (!iframe) return;
+
+      const { htmlStarted, htmlContent } = extractHtmlFromStream(accumulated);
+
+      if (!htmlStarted) return;
+
+      if (!streamHtmlStartedRef.current) {
+        // First time HTML detected — open the iframe document and write initial content
+        streamHtmlStartedRef.current = true;
+        streamPrevHtmlLenRef.current = 0;
+        setStreamingToIframe(true);
+
+        try {
+          const doc = iframe.contentDocument || iframe.contentWindow?.document;
+          if (doc) {
+            doc.open();
+            doc.write(htmlContent);
+            streamPrevHtmlLenRef.current = htmlContent.length;
+          }
+        } catch (e) {
+          console.error("Streaming write error:", e);
+        }
+      } else {
+        // Subsequent chunk — write only the new portion
+        const newContent = htmlContent.slice(streamPrevHtmlLenRef.current);
+        streamPrevHtmlLenRef.current = htmlContent.length;
+
+        if (newContent) {
+          try {
+            const doc = iframe.contentDocument || iframe.contentWindow?.document;
+            if (doc) {
+              doc.write(newContent);
+            }
+          } catch (e) {
+            console.error("Streaming write error:", e);
+          }
+        }
+      }
+    });
+
+    return () => setOnStreamChunk(null);
+  }, [setOnStreamChunk, setStreamingToIframe]);
+
+  // Reset streaming refs when generation finishes
+  useEffect(() => {
+    if (streamPhase === "idle" && streamHtmlStartedRef.current) {
+      streamHtmlStartedRef.current = false;
+      streamPrevHtmlLenRef.current = 0;
+      // setStreamingToIframe(false) is called by the handlers after updateSource
+    }
+  }, [streamPhase]);
+
   // ─── AI Handlers ──────────────────────────────────────────────────
 
+  const buildGeneratePrompt = useCallback(
+    (config: GenerateConfig | "surprise"): string => {
+      const parts: string[] = [
+        "Generate a complete, beautiful, Awwwards-quality design.",
+      ];
+
+      if (config === "surprise") {
+        parts.push(
+          "Pick a creative, visually striking style. Surprise the user with something unique and polished.",
+        );
+      } else {
+        // Style
+        const styleLabels: Record<string, string> = {
+          modern: "Modern / Minimal",
+          bold: "Bold / Striking",
+          soft: "Soft / Organic",
+          corporate: "Corporate / Professional",
+          playful: "Playful / Creative",
+        };
+        parts.push(`Style: ${styleLabels[config.style] ?? config.style}.`);
+
+        // Colors
+        if (config.colorScheme === "custom") {
+          parts.push(
+            `Use these exact colors — primary: ${config.customColors.primary}, secondary: ${config.customColors.secondary}, accent: ${config.customColors.accent}.`,
+          );
+        } else {
+          const schemeLabels: Record<string, string> = {
+            vibrant: "Vibrant, saturated colors",
+            muted: "Muted, soft tones",
+            dark: "Dark mode with deep backgrounds",
+            pastel: "Light pastel palette",
+            monochrome: "Monochrome grayscale palette",
+          };
+          parts.push(`Color scheme: ${schemeLabels[config.colorScheme] ?? config.colorScheme}.`);
+        }
+
+        // Animations
+        if (config.animations) {
+          const animLabels: Record<string, string> = {
+            fade: "subtle fade-in animations on scroll",
+            slide: "slide-up entrance animations on scroll",
+            scale: "scale-in animations on scroll",
+            parallax: "parallax scrolling effects",
+          };
+          parts.push(`Include ${animLabels[config.animationType] ?? "animations"}.`);
+        } else {
+          parts.push("No animations — keep everything static.");
+        }
+
+        // Additional instructions
+        if (config.instructions.trim()) {
+          parts.push(`Additional requirements: ${config.instructions.trim()}`);
+        }
+      }
+
+      // Project context
+      if (projectContext?.name) {
+        parts.push(`This is for "${projectContext.name}".`);
+      }
+      if (projectContext?.description) {
+        parts.push(projectContext.description);
+      }
+
+      return parts.join(" ");
+    },
+    [projectContext],
+  );
+
   const handleGenerateDesign = useCallback(
-    async (archetype: string) => {
+    async (config: GenerateConfig | "surprise") => {
       setStylePickerOpen(false);
 
-      const result = await editDesign(
-        `Generate a complete, beautiful, Awwwards-quality design using the ${archetype} style. ` +
-          (projectContext?.name ? `This is for "${projectContext.name}". ` : "") +
-          (projectContext?.description ?? ""),
+      const prompt = buildGeneratePrompt(config);
+      const label =
+        config === "surprise"
+          ? "Surprise me"
+          : `Generate ${config.style} design (${config.colorScheme} colors)`;
+
+      const result = await editDesignStream(
+        prompt,
         source,
         getHistory(designId),
       );
 
       if (result) {
         updateSource(result);
+        setStreamingToIframe(false);
         addMessage(designId, {
           role: "user",
-          content: `Generate ${archetype} design`,
+          content: label,
           editType: "full-page",
         });
         addMessage(designId, {
@@ -148,14 +290,16 @@ export function DesignEditor({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ html: result }),
         });
+      } else {
+        setStreamingToIframe(false);
       }
     },
-    [source, designId, projectContext, editDesign, updateSource, addMessage, getHistory],
+    [source, designId, buildGeneratePrompt, editDesignStream, updateSource, addMessage, getHistory, setStreamingToIframe],
   );
 
   const handleEditDesign = useCallback(
     async (prompt: string) => {
-      const result = await editDesign(
+      const result = await editDesignStream(
         prompt,
         source,
         getHistory(designId),
@@ -163,6 +307,7 @@ export function DesignEditor({
 
       if (result) {
         updateSource(result);
+        setStreamingToIframe(false);
         addMessage(designId, {
           role: "user",
           content: prompt,
@@ -179,16 +324,18 @@ export function DesignEditor({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ html: result }),
         });
+      } else {
+        setStreamingToIframe(false);
       }
     },
-    [source, designId, editDesign, updateSource, addMessage, getHistory],
+    [source, designId, editDesignStream, updateSource, addMessage, getHistory, setStreamingToIframe],
   );
 
   const handleElementEdit = useCallback(
     async (bfId: string, prompt: string) => {
       const element = useEditorStore.getState().elementTree.find((el) => el.bfId === bfId);
 
-      const result = await modifyElement(
+      const result = await modifyElementStream(
         bfId,
         prompt,
         element
@@ -199,6 +346,7 @@ export function DesignEditor({
 
       if (result) {
         updateSource(result);
+        setStreamingToIframe(false);
         addMessage(designId, {
           role: "user",
           content: prompt,
@@ -215,17 +363,20 @@ export function DesignEditor({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ html: result }),
         });
+      } else {
+        setStreamingToIframe(false);
       }
     },
-    [source, designId, modifyElement, updateSource, addMessage],
+    [source, designId, modifyElementStream, updateSource, addMessage, setStreamingToIframe],
   );
 
   const handleAddSection = useCallback(
     async (afterBfId: string, prompt: string) => {
-      const result = await addSectionAfter(afterBfId, prompt, source);
+      const result = await addSectionAfterStream(afterBfId, prompt, source);
 
       if (result) {
         updateSource(result);
+        setStreamingToIframe(false);
         addMessage(designId, {
           role: "user",
           content: prompt,
@@ -242,9 +393,11 @@ export function DesignEditor({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ html: result }),
         });
+      } else {
+        setStreamingToIframe(false);
       }
     },
-    [source, designId, addSectionAfter, updateSource, addMessage],
+    [source, designId, addSectionAfterStream, updateSource, addMessage, setStreamingToIframe],
   );
 
   const handleRemoveElement = useCallback(
@@ -385,15 +538,11 @@ export function DesignEditor({
             </>
           )}
 
-          {/* Generating overlay */}
-          {isGenerating && (
-            <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/60 backdrop-blur-sm">
-              <div className="flex items-center gap-2 rounded-lg bg-background px-4 py-3 shadow-lg border border-border/60">
-                <div className="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                <span className="text-sm font-medium">Generating...</span>
-              </div>
-            </div>
-          )}
+          {/* Streaming indicator (floating pill) */}
+          <StreamingIndicator
+            phase={streamPhase}
+            onCancel={cancelStream}
+          />
         </div>
 
         {/* Right: Properties panel (design mode, toggled) */}
@@ -441,7 +590,7 @@ export function DesignEditor({
       <StylePickerModal
         open={stylePickerOpen}
         onOpenChange={setStylePickerOpen}
-        onSelect={handleGenerateDesign}
+        onGenerate={handleGenerateDesign}
       />
 
       {/* Upgrade modal (shown on 429) */}

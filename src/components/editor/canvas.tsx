@@ -4,7 +4,7 @@ import { useRef, useEffect } from "react";
 import { X } from "lucide-react";
 import { useEditorStore, BREAKPOINT_WIDTHS } from "@/lib/editor/store";
 import type { EditorElement } from "@/lib/editor/store";
-import { generatePreviewHtml } from "@/lib/design/preview-transform";
+import { generatePreviewHtml, prepareHtmlForPreview, isHtmlDocument } from "@/lib/design/preview-transform";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
@@ -24,6 +24,7 @@ export function Canvas({ iframeRef }: CanvasProps) {
   const setElementTree = useEditorStore((s) => s.setElementTree);
   const setIframeScroll = useEditorStore((s) => s.setIframeScroll);
   const setMode = useEditorStore((s) => s.setMode);
+  const isStreamingToIframe = useEditorStore((s) => s.isStreamingToIframe);
   const { user } = useCurrentUser();
   const isFreePlan = !user?.plan || user.plan === "free";
 
@@ -33,6 +34,7 @@ export function Canvas({ iframeRef }: CanvasProps) {
   useEffect(() => {
     if (!source || !iframeRef.current) return;
     if (mode === "code") return;
+    if (isStreamingToIframe) return; // Streaming writes directly to iframe
 
     if (readyTimeoutRef.current) {
       clearTimeout(readyTimeoutRef.current);
@@ -41,7 +43,12 @@ export function Canvas({ iframeRef }: CanvasProps) {
 
     try {
       // Generate complete preview HTML with optional bridge for design mode
-      let html = generatePreviewHtml(source, { enableBridge: mode === "design" });
+      let html: string;
+      if (isHtmlDocument(source)) {
+        html = prepareHtmlForPreview(source, { enableBridge: mode === "design" });
+      } else {
+        html = generatePreviewHtml(source, { enableBridge: mode === "design" });
+      }
 
       // Inject watermark for free plan
       if (isFreePlan) {
@@ -68,7 +75,7 @@ export function Canvas({ iframeRef }: CanvasProps) {
       console.error("Preview error:", err);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- iframeRef is a stable ref
-  }, [source, mode, isFreePlan]);
+  }, [source, mode, isFreePlan, isStreamingToIframe]);
 
   // Listen for postMessage events from iframe bridge
   useEffect(() => {

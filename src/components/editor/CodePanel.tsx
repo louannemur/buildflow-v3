@@ -4,6 +4,7 @@ import { useRef, useCallback, useEffect, lazy, Suspense } from "react";
 import type { OnMount } from "@monaco-editor/react";
 import { Loader2, Lock } from "lucide-react";
 import { useEditorStore } from "@/lib/editor/store";
+import { isHtmlDocument } from "@/lib/design/preview-transform";
 import { useCurrentUser } from "@/hooks/useAuth";
 
 /* ─── Lazy-loaded Monaco editor ──────────────────────────────────────────── */
@@ -59,6 +60,7 @@ export function CodePanel() {
 
   const plan = user?.plan ?? "free";
   const isReadOnly = plan === "free" || plan === "studio";
+  const language = isHtmlDocument(source) ? "html" : "typescriptreact";
 
   // ─── Debounced source update ──────────────────────────────────────
 
@@ -171,7 +173,7 @@ export function CodePanel() {
         >
           <MonacoEditor
             height="100%"
-            language="typescriptreact"
+            language={language}
             theme="vs-dark"
             value={source}
             onChange={handleChange}

@@ -10,6 +10,7 @@ import {
   removeClassFromElement,
 } from "@/lib/design/code-mutator";
 import { injectBfIds, stripBfIds } from "@/lib/design/inject-bf-ids";
+import { isHtmlDocument } from "@/lib/design/preview-transform";
 
 /* ─── Constants ──────────────────────────────────────────────────────────── */
 
@@ -71,6 +72,9 @@ export interface EditorState {
   // Style guide reference (code from another design marked as style guide)
   styleGuideCode: string | null;
 
+  // Streaming state — suppresses normal iframe render during live streaming
+  isStreamingToIframe: boolean;
+
   // Scroll offset from iframe (for selection overlay positioning)
   iframeScrollTop: number;
   iframeScrollLeft: number;
@@ -117,6 +121,7 @@ export interface EditorState {
 
   // Other
   clearDesign: () => void;
+  setStreamingToIframe: (streaming: boolean) => void;
   setStyleGuideCode: (code: string | null) => void;
   setIframeScroll: (top: number, left: number) => void;
   reset: () => void;
@@ -143,17 +148,26 @@ const initialState = {
   undoStack: [] as string[],
   redoStack: [] as string[],
   styleGuideCode: null as string | null,
+  isStreamingToIframe: false,
   iframeScrollTop: 0,
   iframeScrollLeft: 0,
 };
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
 
-/** Inject bf-ids, apply mutation, strip bf-ids, return clean code */
+/** Apply a mutation to the source code.
+ * For HTML documents (which already contain bf-ids), mutate directly.
+ * For legacy JSX (which stores clean code), inject bf-ids first, mutate, then strip.
+ */
 function mutateCode(
   source: string,
   mutation: (annotated: string) => string,
 ): string {
+  if (isHtmlDocument(source)) {
+    // HTML source already has bf-ids — mutate directly
+    return mutation(source);
+  }
+  // Legacy JSX path: inject bf-ids, mutate, strip
   const { annotatedCode } = injectBfIds(source);
   const mutated = mutation(annotatedCode);
   return stripBfIds(mutated);
@@ -342,6 +356,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ selectedBfId: null, hoveredBfId: null, selectedElement: null, hoveredElement: null });
   },
 
+  setStreamingToIframe: (streaming) => set({ isStreamingToIframe: streaming }),
   setStyleGuideCode: (code) => set({ styleGuideCode: code }),
   setIframeScroll: (top, left) =>
     set({ iframeScrollTop: top, iframeScrollLeft: left }),

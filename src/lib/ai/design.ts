@@ -1,9 +1,13 @@
-import { anthropic } from "@/lib/ai";
+import { ai, GEMINI_MODEL } from "./gemini";
 import { DESIGN_ARCHETYPES } from "@/lib/design/design-archetypes";
 import {
   extractStyleTokens,
   formatTokensForPrompt,
 } from "@/lib/design/style-extractor";
+import { extractHtmlFromResponse } from "./extract-code";
+
+// Re-export for backwards compat
+export { extractCodeFromResponse, extractHtmlFromResponse } from "./extract-code";
 
 // ── Prompt Constants ─────────────────────────────────────────────
 
@@ -11,10 +15,17 @@ const DESIGN_SYSTEM_PROMPT = `You are a world-class web designer who has won mul
 
 THE ONE IDEA RULE: Before writing any code, decide on ONE dominant visual concept for the entire page. Not three, not five — ONE. Examples: "typography-led with a single massive serif headline," or "dark with a single glowing accent color," or "warm cream editorial with asymmetric photo layout." Every element must serve this single concept. If an element doesn't reinforce the concept, delete it.
 
-Output: JSX/Tailwind in a single code block. CSS in style attributes or Tailwind classes. Brief commentary before and after code only. Don't mention Tailwind, React, or tokens.
+Output: A complete, single-file HTML document. Tailwind utility classes and inline styles only. Brief commentary before and after code only. Don't mention Tailwind or tokens in the output.
+
+CRITICAL RULES:
+- Output a full HTML document with <!DOCTYPE html>, <html>, <head>, and <body> tags
+- Use Tailwind CSS via CDN: <script src="https://cdn.tailwindcss.com"></script>
+- Do NOT use React, JSX, Vue, or any framework syntax. Plain HTML + Tailwind + vanilla JS only.
+- All styling via Tailwind utility classes or inline style attributes. No separate CSS files.
+- Add data-bf-id="bf_[8 random alphanumeric chars]" to EVERY element in the body (including nested elements like spans, divs, links, images, buttons, etc.)
 
 [Typography — the #1 differentiator]:
-Load ONE Google Font via @import that perfectly matches the project's personality. This is the most important decision — the wrong font ruins everything. Never default to Inter.
+Load ONE Google Font that perfectly matches the project's personality. This is the most important decision — the wrong font ruins everything. Never default to Inter.
 - Fintech/dev tools → Space Grotesk, JetBrains Mono, IBM Plex Sans
 - Creative/agency → Syne, Clash Display, Cabinet Grotesk
 - Editorial/content → Playfair Display, Lora, Newsreader, DM Serif Display
@@ -48,21 +59,56 @@ Avoid the "centered stack of sections" pattern. Real sites use tension:
 - Left-align body text. Center-align only standalone headlines or CTAs
 
 [Motion — subtle, not showy]:
-Framer Motion for: scroll reveals (useInView, once: true), hover states (scale: 1.02, not 1.1), staggered children (staggerChildren: 0.08). Use transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }} — never "linear" or default ease. Less is more — not everything needs to animate.
+Use GSAP + ScrollTrigger for scroll reveals, CSS transitions for hover states, and IntersectionObserver for simple appear-on-scroll effects. Less is more — not everything needs to animate.
+For scroll reveals, use GSAP ScrollTrigger or vanilla IntersectionObserver:
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('animate-in'); });
+}, { threshold: 0.1 });
+document.querySelectorAll('[data-animate]').forEach(el => observer.observe(el));
 
 [3D — only when it's THE concept]:
-Three.js (window.THREE) is available. ONLY use it when 3D IS the one visual concept — not as decoration on top of an already-busy design. When used: useRef + useEffect pattern, Scene + PerspectiveCamera + WebGLRenderer, requestAnimationFrame loop, cleanup on unmount. Good: a single ambient particle field behind a minimal hero. Bad: particles + gradient text + badge chip + glassmorphism cards all in one page. Import as: import * as THREE from 'three'.
+Three.js is available via CDN. ONLY use it when 3D IS the one visual concept — not as decoration on top of an already-busy design. Good: a single ambient particle field behind a minimal hero. Bad: particles + gradient text + badge chip + glassmorphism cards all in one page.
 
 [Content — sound human]:
 Write copy like a real person for this specific product. The tone must match: dev tools are direct and technical, wellness apps are warm and personal. NEVER use: "Welcome to," "Best-in-class," "Seamless," "Get Started," "Revolutionize," "Unlock the power of," "Your journey starts here." These are AI tells. Real copy is specific and surprising.
 
 Page names (Home, About, Contact) are route names, NOT topics. A "Home" page is the homepage for the project, not about houses.
 
-[Icons]: Use <iconify-icon> web components. Pick ONE icon set per design (ph: for Phosphor, lucide: for Lucide, tabler: for Tabler). Never use inline SVG.
+[Icons]: Use Lucide via CDN:
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+Then in body: <i data-lucide="icon-name"></i>
+Then at end of body: <script>lucide.createIcons();</script>
 
-[Images]: For photos, use https://picsum.photos/{width}/{height} as placeholder URLs — they will be automatically replaced with contextual images. Write DESCRIPTIVE alt attributes that describe the intended image (e.g., alt="team collaborating at a whiteboard" not alt="image"). For avatars use https://i.pravatar.cc/{size}. CSS gradients and colored shapes are PREFERRED over placeholder photos — they look better and load faster. Only use images when the design concept truly calls for photography.
+[Images]: For photos, use https://picsum.photos/{width}/{height} as placeholder URLs. Write DESCRIPTIVE alt attributes that describe the intended image (e.g., alt="team collaborating at a whiteboard" not alt="image"). For avatars use https://i.pravatar.cc/{size}. CSS gradients and colored shapes are PREFERRED over placeholder photos — they look better and load faster. Only use images when the design concept truly calls for photography.
 
-[Output]: Complete, self-contained React component. Start with 'use client', import React and framer-motion, export default function. KEEP IT UNDER 250 LINES. Use map() over repeated JSX. Tailwind classes only — no CSS modules.
+ANIMATION LIBRARIES — use via CDN as appropriate:
+- GSAP: <script src="https://unpkg.com/gsap@3/dist/gsap.min.js"></script> and <script src="https://unpkg.com/gsap@3/dist/ScrollTrigger.min.js"></script>
+- Three.js: <script src="https://unpkg.com/three@latest/build/three.module.js" type="module"></script>
+- Vanta.js: <script src="https://unpkg.com/vanta@latest/dist/vanta.net.min.js"></script>
+- tsParticles: <script src="https://cdn.jsdelivr.net/npm/tsparticles-slim@2/tsparticles.slim.bundle.min.js"></script>
+- anime.js: <script src="https://unpkg.com/animejs@latest/lib/anime.min.js"></script>
+- Lottie: <script src="https://unpkg.com/@lottiefiles/lottie-player@latest/dist/lottie-player.js"></script>
+
+Only include animation libraries if the user requests animations or the design calls for them. Don't add Three.js to a simple pricing page. DO use them for hero sections, landing pages, and when the user asks for something impressive.
+
+GOOGLE FONTS — include in <head>:
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family={font}:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+STRUCTURE:
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- fonts, animation libraries as needed -->
+</head>
+<body>
+  <!-- content with data-bf-id on every element -->
+  <!-- scripts at end of body -->
+</body>
+</html>
 
 [HARD RULES — violating these means the design is bad]:
 1. ONE visual concept per page. If you used gradient text AND glassmorphism AND a badge chip AND a ticker bar AND grid-line backgrounds, you failed. Pick ONE or TWO max.
@@ -84,19 +130,19 @@ CRITICAL: Change as little as possible. Keep the original design structure, code
 
 If the user's request is ambiguous, err on the side of minimal changes. Preserve all animations, typography choices, color palettes, and layout decisions unless explicitly asked to change them. If the existing design has oversized body text (text-lg, text-xl, or text-2xl on paragraphs or card descriptions), fix it — body text should be text-sm or text-base.
 
-Return the COMPLETE updated React component (not just the changed parts). The output must be a full, working component.`;
+Return the COMPLETE updated HTML document (not just the changed parts). The output must be a full, working HTML page.`;
 
 const ELEMENT_MODIFY_PROMPT = `You are modifying a selected HTML element based on user requests. Think through the changes needed, considering design consistency, accessibility, and best practices.
 
-TASK: Modify the selected element based on the user's request and return ONLY the modified element with its EXACT data-element-id preserved. Only code in JSX/Tailwind. Any CSS styles should be in the style attribute. Make sure to always respect the structure and close tags properly. Use <iconify-icon> for icons.
+TASK: Modify the selected element based on the user's request and return ONLY the modified element with its EXACT data-bf-id preserved. Only output HTML with Tailwind classes. Any CSS styles should be in the style attribute. Make sure to always respect the structure and close tags properly. Use <i data-lucide="icon-name"></i> for icons.
 
 Typography rules: Be precise with font weights, going one level lighter than standard. Titles over 20px get tight letter spacing. Avoid px or em for font sizing, minimum size is text-xs. Everything must be responsive. Content text (paragraphs, descriptions, card text) must be text-sm or text-base — never text-lg or larger. Only hero headlines get large sizes.`;
 
 const ADD_SECTION_PROMPT = `You are adding new content after a selected element. Think through the design, structure, and integration with the existing layout.
 
-TASK: Generate new JSX content to be inserted AFTER the specified element based on the user's request. Match the existing design's typography, colors, spacing, and animation patterns. The new section should feel like a natural extension of the existing design.
+TASK: Generate new HTML content to be inserted AFTER the specified element based on the user's request. Match the existing design's typography, colors, spacing, and animation patterns. The new section should feel like a natural extension of the existing design.
 
-Use the same fonts, color palette, and Framer Motion animation patterns as the existing page. Maintain consistent spacing (py-24 or py-32 sections). Body paragraphs and descriptions must be text-sm or text-base. Card titles max at text-lg.`;
+Use the same fonts, color palette, and animation patterns (GSAP, IntersectionObserver, CSS transitions) as the existing page. Maintain consistent spacing (py-24 or py-32 sections). Body paragraphs and descriptions must be text-sm or text-base. Card titles max at text-lg. Add data-bf-id to every element.`;
 
 const CREATIVE_SEEDS = [
   "Make typography the ONLY visual element. No images, no icons, no decorative shapes. The entire design is type, color, and whitespace. Let the font do all the talking.",
@@ -117,32 +163,6 @@ const CREATIVE_SEEDS = [
 ];
 
 // ── Helper Functions ─────────────────────────────────────────────
-
-/**
- * Extract code from an AI response that may contain markdown code blocks.
- */
-export function extractCodeFromResponse(text: string): string {
-  // Try to extract from ```jsx or ```tsx or ``` code blocks
-  const codeBlockMatch = text.match(
-    /```(?:jsx|tsx|javascript|typescript|react)?\s*\n([\s\S]*?)```/
-  );
-  if (codeBlockMatch) {
-    return codeBlockMatch[1].trim();
-  }
-
-  // If the response starts with 'use client' or 'import', treat it as raw code
-  const trimmed = text.trim();
-  if (
-    trimmed.startsWith("'use client'") ||
-    trimmed.startsWith('"use client"') ||
-    trimmed.startsWith("import ")
-  ) {
-    return trimmed;
-  }
-
-  // Return as-is if no code block found
-  return trimmed;
-}
 
 /**
  * Pick N random creative seeds from the list.
@@ -178,7 +198,7 @@ export function getPageTypeGuidance(pageType: string): string {
   }
 }
 
-// ── Core AI Functions ────────────────────────────────────────────
+// ── Core AI Functions (Gemini) ───────────────────────────────────
 
 interface GenerateDesignParams {
   projectName: string;
@@ -191,11 +211,8 @@ interface GenerateDesignParams {
   components?: string[];
 }
 
-/**
- * Generate a new design using Claude.
- */
 export async function generateDesign(
-  params: GenerateDesignParams
+  params: GenerateDesignParams,
 ): Promise<string> {
   const {
     projectName,
@@ -210,31 +227,27 @@ export async function generateDesign(
 
   const pageGuidance = getPageTypeGuidance(pageType);
 
-  // Build style token context if a style guide is provided
   let styleTokenContext = "";
   if (styleGuideCode) {
     const tokens = extractStyleTokens(styleGuideCode);
-    styleTokenContext = `\n\n${formatTokensForPrompt(tokens)}\n\nYou MUST match these tokens exactly. Use the same font, colors, spacing, and radius. The new page should look like it belongs to the same site as the style guide.`;
+    styleTokenContext = `\n\n${formatTokensForPrompt(tokens)}\n\nYou MUST match these tokens exactly. Use the same font, colors, spacing, and radius.`;
   }
 
-  // Archetype directive
   let archetypeDirective = "";
   if (archetype && archetype in DESIGN_ARCHETYPES) {
     const info = DESIGN_ARCHETYPES[archetype as keyof typeof DESIGN_ARCHETYPES];
     archetypeDirective = `\n\nDESIGN ARCHETYPE — ${info.label}:\n${info.promptDirective}`;
   }
 
-  // Creative seeds (only when no style guide — style guide means consistency)
   let creativeSeedContext = "";
   if (!styleGuideCode) {
     const seeds = pickRandomSeeds(2);
-    creativeSeedContext = `\n\nCREATIVE DIRECTION — Pick ONE of these approaches (or ignore both and surprise me with something better):\n${seeds.map((s, i) => `${i + 1}. ${s}`).join("\n")}`;
+    creativeSeedContext = `\n\nCREATIVE DIRECTION — Pick ONE of these approaches (or ignore both and surprise me):\n${seeds.map((s, i) => `${i + 1}. ${s}`).join("\n")}`;
   }
 
-  // Components context
   let componentsContext = "";
   if (components && components.length > 0) {
-    componentsContext = `\n\nAVAILABLE COMPONENTS — You may reference these existing components in your design:\n${components.join("\n")}`;
+    componentsContext = `\n\nAVAILABLE COMPONENTS:\n${components.join("\n")}`;
   }
 
   const systemPrompt = `${DESIGN_SYSTEM_PROMPT}${archetypeDirective}${styleTokenContext}`;
@@ -248,21 +261,22 @@ ${pageGuidance}
 Sections to include: ${sections.join(", ")}
 ${creativeSeedContext}${componentsContext}
 
-Remember: ONE visual concept. Make it award-winning. Output a complete React component in a single code block.`;
+Remember: ONE visual concept. Make it award-winning. Output a complete HTML document.`;
 
   const temperature = styleGuideCode ? 0.7 : 0.95;
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 16384,
-    system: systemPrompt,
-    messages: [{ role: "user", content: userMessage }],
-    temperature,
+  const response = await ai.models.generateContent({
+    model: GEMINI_MODEL,
+    contents: [{ role: "user", parts: [{ text: userMessage }] }],
+    config: {
+      systemInstruction: systemPrompt,
+      temperature,
+      maxOutputTokens: 16384,
+    },
   });
 
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "";
-  return extractCodeFromResponse(text);
+  const text = response.text ?? "";
+  return extractHtmlFromResponse(text);
 }
 
 // ── Edit Design ──────────────────────────────────────────────────
@@ -278,9 +292,6 @@ interface EditDesignParams {
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
 }
 
-/**
- * Edit an existing design based on user instructions.
- */
 export async function editDesign(params: EditDesignParams): Promise<string> {
   const {
     projectName,
@@ -303,40 +314,49 @@ export async function editDesign(params: EditDesignParams): Promise<string> {
 
   const systemPrompt = `${DESIGN_SYSTEM_PROMPT}\n\n${EDIT_DESIGN_PROMPT}${styleTokenContext}`;
 
-  // Build messages array with optional conversation history
-  const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
+  const contents: Array<{ role: "user" | "model"; parts: [{ text: string }] }> = [];
 
   if (conversationHistory && conversationHistory.length > 0) {
-    messages.push(...conversationHistory);
+    for (const msg of conversationHistory) {
+      contents.push({
+        role: msg.role === "assistant" ? "model" : "user",
+        parts: [{ text: msg.content }],
+      });
+    }
   }
 
-  messages.push({
+  contents.push({
     role: "user",
-    content: `Project: "${projectName}" — ${projectDescription}
+    parts: [
+      {
+        text: `Project: "${projectName}" — ${projectDescription}
 Page: "${pageName}" (${pageType})
 ${pageGuidance}
 
 Current design code:
-\`\`\`jsx
+\`\`\`html
 ${previousHtml}
 \`\`\`
 
 Edit request: ${editRequest}
 
-Return the COMPLETE updated React component with ALL the changes applied. Do not omit any sections.`,
+Return the COMPLETE updated HTML document with ALL the changes applied. Do not omit any sections.`,
+      },
+    ],
   });
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 16384,
-    system: systemPrompt,
-    messages,
-    temperature: 0.3,
+  const response = await ai.models.generateContent({
+    model: GEMINI_MODEL,
+    contents,
+    config: {
+      systemInstruction: systemPrompt,
+      temperature: 0.3,
+      maxOutputTokens: 16384,
+    },
   });
 
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "";
-  return extractCodeFromResponse(text);
+  const text = response.text ?? "";
+  return extractHtmlFromResponse(text);
 }
 
 // ── Modify Element ───────────────────────────────────────────────
@@ -350,52 +370,41 @@ interface ModifyElementParams {
   userRequest: string;
 }
 
-/**
- * Modify a specific element within a design.
- */
 export async function modifyElement(
-  params: ModifyElementParams
+  params: ModifyElementParams,
 ): Promise<string> {
-  const {
-    elementHtml,
-    elementId,
-    elementTag,
-    elementClasses,
-    fullPageHtml,
-    userRequest,
-  } = params;
-
-  const systemPrompt = ELEMENT_MODIFY_PROMPT;
+  const { elementHtml, elementId, elementTag, elementClasses, fullPageHtml, userRequest } = params;
 
   const userMessage = `Selected element:
 - Tag: <${elementTag}>
-- ID: ${elementId}
+- data-bf-id: ${elementId}
 - Classes: ${elementClasses}
 - Current HTML:
-\`\`\`jsx
+\`\`\`html
 ${elementHtml}
 \`\`\`
 
 Full page context (for reference only — do NOT return the full page):
-\`\`\`jsx
+\`\`\`html
 ${fullPageHtml}
 \`\`\`
 
 User request: ${userRequest}
 
-Return ONLY the modified element JSX with its exact data-element-id="${elementId}" preserved. Nothing else.`;
+Return ONLY the modified element HTML with its exact data-bf-id="${elementId}" preserved. Nothing else.`;
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 8192,
-    system: systemPrompt,
-    messages: [{ role: "user", content: userMessage }],
-    temperature: 0.3,
+  const response = await ai.models.generateContent({
+    model: GEMINI_MODEL,
+    contents: [{ role: "user", parts: [{ text: userMessage }] }],
+    config: {
+      systemInstruction: ELEMENT_MODIFY_PROMPT,
+      temperature: 0.3,
+      maxOutputTokens: 8192,
+    },
   });
 
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "";
-  return extractCodeFromResponse(text);
+  const text = response.text ?? "";
+  return extractHtmlFromResponse(text);
 }
 
 // ── Add Section ──────────────────────────────────────────────────
@@ -409,20 +418,8 @@ interface AddSectionParams {
   userRequest: string;
 }
 
-/**
- * Add a new section after a specified element.
- */
 export async function addSection(params: AddSectionParams): Promise<string> {
-  const {
-    projectName,
-    pageName,
-    afterElementHtml,
-    afterElementTag,
-    fullPageHtml,
-    userRequest,
-  } = params;
-
-  const systemPrompt = ADD_SECTION_PROMPT;
+  const { projectName, pageName, afterElementHtml, afterElementTag, fullPageHtml, userRequest } = params;
 
   const userMessage = `Project: "${projectName}"
 Page: "${pageName}"
@@ -430,28 +427,173 @@ Page: "${pageName}"
 Insert new content AFTER this element:
 - Tag: <${afterElementTag}>
 - HTML:
-\`\`\`jsx
+\`\`\`html
 ${afterElementHtml}
 \`\`\`
 
 Full page context (for design matching — do NOT return the full page):
-\`\`\`jsx
+\`\`\`html
 ${fullPageHtml}
 \`\`\`
 
 User request: ${userRequest}
 
-Return ONLY the new section JSX to be inserted. Match the existing design language exactly.`;
+Return ONLY the new section HTML to be inserted. Add data-bf-id to every element. Match the existing design language exactly.`;
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 8192,
-    system: systemPrompt,
-    messages: [{ role: "user", content: userMessage }],
-    temperature: 0.5,
+  const response = await ai.models.generateContent({
+    model: GEMINI_MODEL,
+    contents: [{ role: "user", parts: [{ text: userMessage }] }],
+    config: {
+      systemInstruction: ADD_SECTION_PROMPT,
+      temperature: 0.5,
+      maxOutputTokens: 8192,
+    },
   });
 
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "";
-  return extractCodeFromResponse(text);
+  const text = response.text ?? "";
+  return extractHtmlFromResponse(text);
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  Streaming variants — return AsyncGenerator<{ text: string }>
+// ══════════════════════════════════════════════════════════════════
+
+export async function* editDesignStream(
+  params: EditDesignParams,
+): AsyncGenerator<{ text: string }> {
+  const {
+    projectName, projectDescription, pageName, pageType,
+    previousHtml, editRequest, styleGuideCode, conversationHistory,
+  } = params;
+
+  const pageGuidance = getPageTypeGuidance(pageType);
+
+  let styleTokenContext = "";
+  if (styleGuideCode) {
+    const tokens = extractStyleTokens(styleGuideCode);
+    styleTokenContext = `\n\n${formatTokensForPrompt(tokens)}\n\nMaintain consistency with these design tokens.`;
+  }
+
+  const systemPrompt = `${DESIGN_SYSTEM_PROMPT}\n\n${EDIT_DESIGN_PROMPT}${styleTokenContext}`;
+
+  const contents: Array<{ role: "user" | "model"; parts: [{ text: string }] }> = [];
+  if (conversationHistory && conversationHistory.length > 0) {
+    for (const msg of conversationHistory) {
+      contents.push({
+        role: msg.role === "assistant" ? "model" : "user",
+        parts: [{ text: msg.content }],
+      });
+    }
+  }
+  contents.push({
+    role: "user",
+    parts: [{
+      text: `Project: "${projectName}" — ${projectDescription}
+Page: "${pageName}" (${pageType})
+${pageGuidance}
+
+Current design code:
+\`\`\`html
+${previousHtml}
+\`\`\`
+
+Edit request: ${editRequest}
+
+Return the COMPLETE updated HTML document with ALL the changes applied. Do not omit any sections.`,
+    }],
+  });
+
+  const response = await ai.models.generateContentStream({
+    model: GEMINI_MODEL,
+    contents,
+    config: {
+      systemInstruction: systemPrompt,
+      temperature: 0.3,
+      maxOutputTokens: 16384,
+    },
+  });
+
+  for await (const chunk of response) {
+    const text = chunk.text;
+    if (text) yield { text };
+  }
+}
+
+export async function* modifyElementStream(
+  params: ModifyElementParams,
+): AsyncGenerator<{ text: string }> {
+  const { elementHtml, elementId, elementTag, elementClasses, fullPageHtml, userRequest } = params;
+
+  const userMessage = `Selected element:
+- Tag: <${elementTag}>
+- data-bf-id: ${elementId}
+- Classes: ${elementClasses}
+- Current HTML:
+\`\`\`html
+${elementHtml}
+\`\`\`
+
+Full page context (for reference only — do NOT return the full page):
+\`\`\`html
+${fullPageHtml}
+\`\`\`
+
+User request: ${userRequest}
+
+Return ONLY the modified element HTML with its exact data-bf-id="${elementId}" preserved. Nothing else.`;
+
+  const response = await ai.models.generateContentStream({
+    model: GEMINI_MODEL,
+    contents: [{ role: "user", parts: [{ text: userMessage }] }],
+    config: {
+      systemInstruction: ELEMENT_MODIFY_PROMPT,
+      temperature: 0.3,
+      maxOutputTokens: 8192,
+    },
+  });
+
+  for await (const chunk of response) {
+    const text = chunk.text;
+    if (text) yield { text };
+  }
+}
+
+export async function* addSectionStream(
+  params: AddSectionParams,
+): AsyncGenerator<{ text: string }> {
+  const { projectName, pageName, afterElementHtml, afterElementTag, fullPageHtml, userRequest } = params;
+
+  const userMessage = `Project: "${projectName}"
+Page: "${pageName}"
+
+Insert new content AFTER this element:
+- Tag: <${afterElementTag}>
+- HTML:
+\`\`\`html
+${afterElementHtml}
+\`\`\`
+
+Full page context (for design matching — do NOT return the full page):
+\`\`\`html
+${fullPageHtml}
+\`\`\`
+
+User request: ${userRequest}
+
+Return ONLY the new section HTML to be inserted. Add data-bf-id to every element. Match the existing design language exactly.`;
+
+  const response = await ai.models.generateContentStream({
+    model: GEMINI_MODEL,
+    contents: [{ role: "user", parts: [{ text: userMessage }] }],
+    config: {
+      systemInstruction: ADD_SECTION_PROMPT,
+      temperature: 0.5,
+      maxOutputTokens: 8192,
+    },
+  });
+
+  for await (const chunk of response) {
+    const text = chunk.text;
+    if (text) yield { text };
+  }
 }
