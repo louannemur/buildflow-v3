@@ -10,6 +10,11 @@ function getCurrentPeriod() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
+/** Infinity → 999_999 so it survives JSON serialization */
+function safeLimit(value: number): number {
+  return value === Infinity ? 999_999 : value;
+}
+
 export async function GET() {
   try {
     const session = await auth();
@@ -47,10 +52,10 @@ export async function GET() {
         designsSaved: currentUsage?.designsSaved ?? 0,
       },
       limits: {
-        maxProjects: limits.maxProjects,
-        maxDesigns: limits.maxDesigns,
-        maxDesignGenerationsPerDay: limits.maxDesignGenerationsPerDay,
-        maxAiGenerationsPerMonth: limits.maxAiGenerationsPerMonth,
+        maxProjects: safeLimit(limits.maxProjects),
+        maxDesigns: safeLimit(limits.maxDesigns),
+        maxDesignGenerationsPerDay: safeLimit(limits.maxDesignGenerationsPerDay),
+        maxAiGenerationsPerMonth: safeLimit(limits.maxAiGenerationsPerMonth),
       },
     });
   } catch {
