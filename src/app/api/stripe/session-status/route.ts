@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { stripe } from "@/lib/stripe";
+import { db } from "@/lib/db";
+import { subscriptions } from "@/lib/db/schema";
 
 export async function GET(req: Request) {
   try {
@@ -25,6 +28,48 @@ export async function GET(req: Request) {
     // Verify the session belongs to this user
     if (checkoutSession.metadata?.userId !== session.user.id) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    // If checkout is complete, eagerly sync subscription to avoid webhook race condition
+    if (
+      checkoutSession.status === "complete" &&
+      checkoutSession.mode === "subscription" &&
+      checkoutSession.subscription
+    ) {
+      const stripeSubscriptionId =
+        typeof checkoutSession.subscription === "string"
+          ? checkoutSession.subscription
+          : checkoutSession.subscription.id;
+
+      const stripeCustomerId =
+        typeof checkoutSession.customer === "string"
+          ? checkoutSession.customer
+          : checkoutSession.customer?.id;
+
+      const planName = checkoutSession.metadata?.planName ?? "free";
+
+      // Retrieve the full subscription for period dates
+      const stripeSub = await stripe.subscriptions.retrieve(stripeSubscriptionId);
+      const subItem = stripeSub.items.data[0];
+      const stripePriceId = subItem?.price?.id ?? null;
+
+      await db
+        .update(subscriptions)
+        .set({
+          stripeCustomerId: stripeCustomerId ?? null,
+          stripeSubscriptionId,
+          stripePriceId,
+          plan: planName as "free" | "studio" | "pro" | "founding",
+          status: "active",
+          currentPeriodStart: subItem
+            ? new Date(subItem.current_period_start * 1000)
+            : null,
+          currentPeriodEnd: subItem
+            ? new Date(subItem.current_period_end * 1000)
+            : null,
+          cancelAtPeriodEnd: stripeSub.cancel_at_period_end,
+        })
+        .where(eq(subscriptions.userId, session.user.id));
     }
 
     return NextResponse.json({
