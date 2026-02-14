@@ -360,37 +360,45 @@ export function ProjectLayout({
   const { sidebarOpen, toggleSidebar } = useAppStore();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const stepFromParams = searchParams.get("step") as ProjectStep | null;
+  // Derive active step from the current URL path
+  const pathSegments = pathname.split("/");
+  const lastSegment = pathSegments[pathSegments.length - 1];
+  const stepFromPath = ["features", "flows", "pages", "designs", "build"].includes(lastSegment)
+    ? (lastSegment as ProjectStep)
+    : null;
+
   const [activeStep, setActiveStepState] = useState<ProjectStep>(
-    stepFromParams ?? project.currentStep
+    stepFromPath ?? project.currentStep
   );
   const [activeItemId, setActiveItemId] = useState<string | null>(
     searchParams.get("item")
   );
 
+  // Keep activeStep in sync when URL changes
+  if (stepFromPath && stepFromPath !== activeStep) {
+    setActiveStepState(stepFromPath);
+  }
+
+  // Extract the base project path (e.g. /project/abc123)
+  const projectBasePath = pathname.match(/^\/project\/[^/]+/)?.[0] ?? pathname;
+
   const setActiveStep = useCallback(
     (step: ProjectStep) => {
       setActiveStepState(step);
       setActiveItemId(null);
-      const params = new URLSearchParams(searchParams.toString());
-      params.set("step", step);
-      params.delete("item");
-      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      router.push(`${projectBasePath}/${step}`);
     },
-    [pathname, searchParams, router]
+    [projectBasePath, router]
   );
 
   const handleItemClick = useCallback(
     (step: ProjectStep, itemId: string) => {
       setActiveStepState(step);
       setActiveItemId(itemId);
-      const params = new URLSearchParams(searchParams.toString());
-      params.set("step", step);
-      params.set("item", itemId);
-      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      router.push(`${projectBasePath}/${step}?item=${itemId}`);
       setMobileOpen(false);
     },
-    [pathname, searchParams, router]
+    [projectBasePath, router]
   );
 
   const handleStepClick = useCallback(
