@@ -48,6 +48,29 @@ function getInitials(name?: string | null) {
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
 
+/* ─── Default Avatars ───────────────────────────────────────────────────── */
+
+const DEFAULT_AVATARS = [
+  // Gradient circles
+  { id: "sunset", gradient: ["#FF6B6B", "#FFE66D"], emoji: "" },
+  { id: "ocean", gradient: ["#4ECDC4", "#2C3E50"], emoji: "" },
+  { id: "lavender", gradient: ["#A78BFA", "#EC4899"], emoji: "" },
+  { id: "forest", gradient: ["#22C55E", "#065F46"], emoji: "" },
+  { id: "sky", gradient: ["#38BDF8", "#818CF8"], emoji: "" },
+  { id: "peach", gradient: ["#FB923C", "#F472B6"], emoji: "" },
+  { id: "midnight", gradient: ["#6366F1", "#1E1B4B"], emoji: "" },
+  { id: "rose", gradient: ["#FB7185", "#BE123C"], emoji: "" },
+  { id: "teal", gradient: ["#2DD4BF", "#0D9488"], emoji: "" },
+  { id: "amber", gradient: ["#F59E0B", "#D97706"], emoji: "" },
+  { id: "slate", gradient: ["#64748B", "#334155"], emoji: "" },
+  { id: "coral", gradient: ["#F97316", "#EF4444"], emoji: "" },
+];
+
+function buildAvatarSvg(gradient: [string, string]): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="${gradient[0]}"/><stop offset="100%" stop-color="${gradient[1]}"/></linearGradient></defs><rect width="128" height="128" rx="64" fill="url(#g)"/></svg>`;
+  return `data:image/svg+xml;base64,${btoa(svg)}`;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════ */
 /*  Profile Form                                                             */
 /* ═══════════════════════════════════════════════════════════════════════════ */
@@ -211,16 +234,12 @@ export function ProfileForm() {
         <CardHeader>
           <CardTitle className="text-sm">Avatar</CardTitle>
           <CardDescription>
-            Your profile picture. Click to upload a new one.
+            Choose a default avatar or upload your own image.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <div className="flex items-center gap-5">
-            <button
-              type="button"
-              onClick={handleAvatarClick}
-              className="group relative shrink-0"
-            >
+            <div className="relative shrink-0">
               <Avatar className="size-20">
                 <AvatarImage
                   src={displayImage ?? undefined}
@@ -230,17 +249,15 @@ export function ProfileForm() {
                   {getInitials(profile.name)}
                 </AvatarFallback>
               </Avatar>
-              <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
-                <Camera className="size-5 text-white" />
-              </div>
-            </button>
+            </div>
             <div className="space-y-1.5">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleAvatarClick}
               >
-                Change Avatar
+                <Camera className="size-3.5" />
+                Upload Image
               </Button>
               <p className="text-[11px] text-muted-foreground">
                 JPG, PNG or GIF. Max 2MB.
@@ -253,6 +270,40 @@ export function ProfileForm() {
               className="hidden"
               onChange={handleFileChange}
             />
+          </div>
+
+          {/* Default avatar options */}
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted-foreground">
+              Or choose a default
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {DEFAULT_AVATARS.map((a) => {
+                const src = buildAvatarSvg(a.gradient as [string, string]);
+                const isSelected = displayImage === src;
+                return (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => {
+                      setAvatarPreview(src);
+                      setAvatarFile(src);
+                    }}
+                    className={`relative size-10 shrink-0 rounded-full transition-all hover:scale-110 ${
+                      isSelected
+                        ? "ring-2 ring-primary ring-offset-2 ring-offset-background"
+                        : "ring-1 ring-border hover:ring-foreground/30"
+                    }`}
+                  >
+                    <img
+                      src={src}
+                      alt={a.id}
+                      className="size-full rounded-full"
+                    />
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </CardContent>
       </Card>
