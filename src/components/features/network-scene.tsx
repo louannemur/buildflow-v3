@@ -47,7 +47,9 @@ function NetworkSphere({ isTalking = false }: { isTalking?: boolean }) {
     const colors = new Float32Array(tempPoints.length * 3);
     const colorObj = new THREE.Color();
     tempPoints.forEach((point, i) => {
-      const isAccent = Math.random() > 0.85 || point.y > RADIUS * 0.8;
+      // Deterministic pseudo-random based on index (avoids Math.random in render)
+      const hash = ((i * 2654435761) >>> 0) / 4294967296;
+      const isAccent = hash > 0.85 || point.y > RADIUS * 0.8;
       colorObj.set(isAccent ? COLORS.primary : COLORS.secondary);
       colorObj.toArray(colors, i * 3);
     });
