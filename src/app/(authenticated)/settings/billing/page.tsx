@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { BillingContent } from "./billing-content";
 
 export const metadata: Metadata = {
-  title: "Billing Settings | BuildFlow",
+  title: "Billing Settings | Calypso",
 };
 
 export default function BillingSettingsPage() {

@@ -87,7 +87,7 @@ function HeroVisual() {
             <div className="size-2.5 rounded-full bg-green-400/80" />
           </div>
           <div className="ml-4 flex-1 rounded-md bg-background/60 px-3 py-1 text-center text-[11px] text-muted-foreground">
-            buildflow.app/project/my-saas
+            calypso.app/project/my-saas
           </div>
         </div>
 
@@ -422,7 +422,7 @@ export function LandingContent() {
                 variants={staggerItem}
                 className="mx-auto mt-5 max-w-2xl text-base text-muted-foreground sm:text-lg sm:leading-relaxed"
               >
-                BuildFlow turns your ideas into features, user flows, pages,
+                Calypso turns your ideas into features, user flows, pages,
                 pixel-perfect designs, and clean code — all with AI, all in one
                 place.
               </motion.p>
@@ -791,7 +791,7 @@ export function LandingContent() {
               className="mx-auto mt-4 max-w-lg text-muted-foreground"
             >
               Join thousands of developers and designers building with
-              BuildFlow. Free to start, no credit card required.
+              Calypso. Free to start, no credit card required.
             </motion.p>
             <motion.div
               variants={staggerItem}
@@ -816,7 +816,7 @@ export function LandingContent() {
             <div>
               <Link href="/" className="inline-block">
                 <span className="text-lg font-bold tracking-tight">
-                  Build<span className="text-primary">Flow</span>
+                  Calypso
                 </span>
               </Link>
               <p className="mt-3 max-w-xs text-sm leading-relaxed text-muted-foreground">
@@ -914,7 +914,7 @@ export function LandingContent() {
 
           <div className="mt-12 border-t border-border/50 pt-6">
             <p className="text-center text-xs text-muted-foreground">
-              &copy; {new Date().getFullYear()} BuildFlow. All rights reserved.
+              &copy; {new Date().getFullYear()} Calypso. All rights reserved.
             </p>
           </div>
         </Section>

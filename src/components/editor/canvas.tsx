@@ -75,7 +75,7 @@ export function Canvas({ iframeRef }: CanvasProps) {
 
       // Inject watermark for free plan
       if (isFreePlan) {
-        const watermark = `<div style="position:fixed;bottom:12px;right:12px;z-index:99999;pointer-events:none;background:rgba(0,0,0,0.6);color:#fff;font-size:11px;font-weight:500;padding:4px 10px;border-radius:999px;font-family:system-ui,sans-serif;letter-spacing:0.01em;">Made with BuildFlow</div>`;
+        const watermark = `<div style="position:fixed;bottom:12px;right:12px;z-index:99999;pointer-events:none;background:rgba(0,0,0,0.6);color:#fff;font-size:11px;font-weight:500;padding:4px 10px;border-radius:999px;font-family:system-ui,sans-serif;letter-spacing:0.01em;">Made with Calypso</div>`;
         html = html.replace("</body>", watermark + "</body>");
       }
 

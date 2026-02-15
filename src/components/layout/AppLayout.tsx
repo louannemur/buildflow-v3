@@ -155,7 +155,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 <SheetHeader>
                   <SheetTitle>
                     <span className="text-lg font-bold tracking-tight">
-                      Build<span className="text-primary">Flow</span>
+                      Calypso
                     </span>
                   </SheetTitle>
                 </SheetHeader>
@@ -190,7 +190,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           {/* Logo */}
           <Link href="/home" className="mr-6 shrink-0">
             <span className="text-lg font-bold tracking-tight">
-              Build<span className="text-primary">Flow</span>
+              Calypso
             </span>
           </Link>
 

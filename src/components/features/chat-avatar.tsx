@@ -50,7 +50,7 @@ export function ChatAvatar({ state, className }: ChatAvatarProps) {
 
         {/* Initials */}
         <span className="relative text-lg font-bold text-primary-foreground select-none">
-          BF
+          C
         </span>
       </motion.div>
     </div>

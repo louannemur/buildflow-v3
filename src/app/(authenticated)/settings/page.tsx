@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { SettingsContent } from "./settings-content";
 
 export const metadata: Metadata = {
-  title: "Settings | BuildFlow",
+  title: "Settings | Calypso",
 };
 
 export default function SettingsPage() {

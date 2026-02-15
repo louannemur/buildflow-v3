@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { anthropic } from "@/lib/ai";
 import { classifyMessageSchema } from "@/lib/validators/chat";
 
-const SYSTEM_PROMPT = `You are an intent classifier for BuildFlow, a web design and development tool.
+const SYSTEM_PROMPT = `You are an intent classifier for Calypso, a web design and development tool.
 
 Classify the user's message into exactly one intent:
 - "new_project": The user wants to build a web app, site, or product (e.g., "build me a task manager", "I want to create a SaaS app")
@@ -13,7 +13,7 @@ Classify the user's message into exactly one intent:
 Respond with ONLY a JSON object, no other text:
 {"intent": "<intent>", "name": "<short project/design name if applicable>", "description": "<one-sentence description if applicable>", "message": "<helpful response if intent is general>"}
 
-For "general" intent, include a friendly message helping them use BuildFlow. For "new_project" and "new_design", extract a clear name and description from their request.`;
+For "general" intent, include a friendly message helping them use Calypso. For "new_project" and "new_design", extract a clear name and description from their request.`;
 
 export async function POST(req: Request) {
   try {

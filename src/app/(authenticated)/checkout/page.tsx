@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { CheckoutContent } from "./checkout-content";
 
 export const metadata: Metadata = {
-  title: "Checkout | BuildFlow",
+  title: "Checkout | Calypso",
 };
 
 export default function CheckoutPage() {

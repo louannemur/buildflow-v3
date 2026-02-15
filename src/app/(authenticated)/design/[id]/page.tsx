@@ -13,7 +13,7 @@ export async function generateMetadata({
 }) {
   const { id } = await params;
   const session = await auth();
-  if (!session?.user) return { title: "Design | BuildFlow" };
+  if (!session?.user) return { title: "Design | Calypso" };
 
   const design = await db.query.designs.findFirst({
     where: and(eq(designs.id, id), eq(designs.userId, session.user.id)),
@@ -21,7 +21,7 @@ export async function generateMetadata({
   });
 
   return {
-    title: design ? `${design.name} | BuildFlow` : "Design | BuildFlow",
+    title: design ? `${design.name} | Calypso` : "Design | Calypso",
   };
 }
 

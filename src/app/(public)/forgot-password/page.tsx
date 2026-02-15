@@ -66,7 +66,7 @@ export default function ForgotPasswordPage() {
         <motion.div custom={0} variants={fadeUp} className="mb-8 text-center">
           <Link href="/" className="inline-block">
             <h1 className="text-2xl font-bold tracking-tight">
-              Build<span className="text-primary">Flow</span>
+              Calypso
             </h1>
           </Link>
         </motion.div>

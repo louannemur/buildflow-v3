@@ -102,7 +102,7 @@ export default function LoginPage() {
         >
           <Link href="/" className="inline-block">
             <h1 className="text-2xl font-bold tracking-tight">
-              Build<span className="text-primary">Flow</span>
+              Calypso
             </h1>
           </Link>
         </motion.div>

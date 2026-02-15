@@ -465,7 +465,7 @@ export function ProjectLayout({
             {/* Logo */}
             <Link href="/home" className="mr-4 shrink-0">
               <span className="text-lg font-bold tracking-tight">
-                Build<span className="text-primary">Flow</span>
+                Calypso
               </span>
             </Link>
 

@@ -1,1 +1,1 @@
-// AI prompt templates for BuildFlow
+// AI prompt templates for Calypso

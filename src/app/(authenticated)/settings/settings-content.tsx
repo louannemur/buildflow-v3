@@ -66,7 +66,7 @@ export function SettingsContent() {
             <CardTitle className="text-sm">Appearance</CardTitle>
           </div>
           <CardDescription>
-            Choose how BuildFlow looks to you.
+            Choose how Calypso looks to you.
           </CardDescription>
         </CardHeader>
         <CardContent>

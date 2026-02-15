@@ -18,7 +18,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { ChatAvatar } from "@/components/features/chat-avatar";
+import { NetworkGraph } from "@/components/features/network-graph";
 import { UpgradeModal } from "@/components/features/upgrade-modal";
 import { ProjectCard } from "@/components/features/project-card";
 import { DesignCard } from "@/components/features/design-card";
@@ -67,6 +67,14 @@ const staggerItem = {
   },
 };
 
+/* ─── Suggestion chips ───────────────────────────────────────────────────── */
+
+const SUGGESTION_CHIPS = [
+  { label: "Create a project", text: "Create a new project" },
+  { label: "Create a design", text: "Create a new standalone design" },
+  { label: "Surprise me", text: "Surprise me with a creative project idea" },
+];
+
 /* ─── Date formatter ─────────────────────────────────────────────────────── */
 
 function formatRelativeDate(dateStr: string) {
@@ -96,7 +104,6 @@ export function HomeContent() {
   // Chat state
   const [chatInput, setChatInput] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
-  const [avatarState, setAvatarState] = useState<"idle" | "active">("idle");
 
   // Upgrade modal
   const [upgradeOpen, setUpgradeOpen] = useState(false);
@@ -111,7 +118,6 @@ export function HomeContent() {
   // ─── Fetch recents ────────────────────────────────────────────────────
 
   const fetchRecents = useCallback(async (t: Tab) => {
-    // Use cache if available
     if (recentsCache.current[t]) {
       setRecents(recentsCache.current[t]!);
       setRecentsLoading(false);
@@ -189,12 +195,11 @@ export function HomeContent() {
 
   // ─── Chat submit ──────────────────────────────────────────────────────
 
-  async function handleChatSubmit() {
-    const message = chatInput.trim();
+  async function handleChatSubmit(text?: string) {
+    const message = (text ?? chatInput).trim();
     if (!message || isProcessing) return;
 
     setIsProcessing(true);
-    setAvatarState("active");
 
     try {
       const res = await fetch("/api/chat/classify", {
@@ -233,7 +238,6 @@ export function HomeContent() {
       toast.error("Something went wrong. Please try again.");
     } finally {
       setIsProcessing(false);
-      setAvatarState("idle");
     }
   }
 
@@ -268,103 +272,122 @@ export function HomeContent() {
 
   return (
     <>
-      <div className="px-4 pb-16 pt-8 sm:px-6 sm:pt-12">
-        {/* ── Hero / Chat Section ──────────────────────────────────────── */}
+      <div className="px-4 pb-16 sm:px-6">
+        {/* ── Hero — network graph + content ──────────────────────────── */}
         <motion.div
           initial="hidden"
           animate="visible"
           variants={staggerContainer}
-          className="mx-auto max-w-2xl"
+          className="mx-auto flex max-w-6xl items-center justify-center gap-12 py-10 lg:gap-20 lg:py-16"
         >
-          {/* Avatar */}
+          {/* Network graph (left side, hidden on small screens) */}
           <motion.div
             variants={staggerItem}
-            className="flex justify-center"
+            className="hidden shrink-0 lg:block"
+            style={{ width: 420, height: 420 }}
           >
-            <ChatAvatar state={avatarState} />
+            <NetworkGraph isTalking={isProcessing} />
           </motion.div>
 
-          {/* Welcome */}
-          <motion.h1
-            variants={staggerItem}
-            className="mt-6 text-center text-2xl font-semibold tracking-tight sm:text-3xl"
-          >
-            {authLoading ? (
-              <Skeleton className="mx-auto h-8 w-48" />
-            ) : (
-              <>Welcome back, {firstName}</>
-            )}
-          </motion.h1>
-          <motion.p
-            variants={staggerItem}
-            className="mt-2 text-center text-sm text-muted-foreground"
-          >
-            What would you like to build today?
-          </motion.p>
+          {/* Content (right side) */}
+          <div className="flex max-w-xl flex-1 flex-col">
+            {/* Greeting */}
+            <motion.div variants={staggerItem} className="flex items-start gap-3">
+              <span className="mt-2 text-xl text-muted-foreground">—</span>
+              <div>
+                <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+                  {authLoading ? (
+                    <Skeleton className="h-10 w-64" />
+                  ) : (
+                    <>Welcome back, {firstName}!</>
+                  )}
+                </h1>
+                <p className="mt-1 text-base text-muted-foreground">
+                  What shall we make today?
+                </p>
+              </div>
+            </motion.div>
 
-          {/* Chat input */}
-          <motion.div variants={staggerItem} className="mt-6">
-            <div className="relative">
-              <textarea
-                ref={textareaRef}
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Start a new project, create a design, or ask me anything..."
+            {/* Suggestion chips */}
+            <motion.div
+              variants={staggerItem}
+              className="ml-8 mt-5 flex flex-wrap gap-2"
+            >
+              {SUGGESTION_CHIPS.map((chip) => (
+                <button
+                  key={chip.label}
+                  onClick={() => handleChatSubmit(chip.text)}
+                  disabled={isProcessing}
+                  className="rounded-full border border-border bg-card px-4 py-2 text-sm text-foreground/80 transition-colors hover:border-primary hover:text-foreground disabled:opacity-50"
+                >
+                  {chip.label}
+                </button>
+              ))}
+            </motion.div>
+
+            {/* Chat input */}
+            <motion.div variants={staggerItem} className="ml-8 mt-4">
+              <div className="relative overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-colors focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/20">
+                <textarea
+                  ref={textareaRef}
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Describe your vision..."
+                  disabled={isProcessing}
+                  rows={1}
+                  className={cn(
+                    "w-full resize-none bg-transparent px-4 py-3 pr-12 text-sm",
+                    "placeholder:text-muted-foreground/60",
+                    "focus:outline-none",
+                    "disabled:opacity-60",
+                    "min-h-[48px] max-h-[120px]",
+                  )}
+                  style={{ fieldSizing: "content" } as React.CSSProperties}
+                />
+                <button
+                  onClick={() => handleChatSubmit()}
+                  disabled={!chatInput.trim() || isProcessing}
+                  className={cn(
+                    "absolute bottom-2 right-2 flex size-8 items-center justify-center rounded-lg transition-colors",
+                    chatInput.trim() && !isProcessing
+                      ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                      : "text-muted-foreground/40",
+                  )}
+                >
+                  {isProcessing ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Send className="size-4" />
+                  )}
+                </button>
+              </div>
+            </motion.div>
+
+            {/* Action buttons */}
+            <motion.div
+              variants={staggerItem}
+              className="ml-8 mt-4 flex gap-3"
+            >
+              <Button
+                onClick={handleNewProject}
                 disabled={isProcessing}
-                rows={1}
-                className={cn(
-                  "w-full resize-none rounded-xl border border-border/60 bg-card px-4 py-3 pr-12 text-sm shadow-sm transition-colors",
-                  "placeholder:text-muted-foreground/60",
-                  "focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20",
-                  "disabled:opacity-60",
-                  "min-h-[48px] max-h-[120px]",
-                )}
-                style={{ fieldSizing: "content" } as React.CSSProperties}
-              />
-              <button
-                onClick={handleChatSubmit}
-                disabled={!chatInput.trim() || isProcessing}
-                className={cn(
-                  "absolute bottom-2 right-2 flex size-8 items-center justify-center rounded-lg transition-colors",
-                  chatInput.trim() && !isProcessing
-                    ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                    : "text-muted-foreground/40",
-                )}
+                className="flex-1"
               >
-                {isProcessing ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Send className="size-4" />
-                )}
-              </button>
-            </div>
-          </motion.div>
-
-          {/* Quick action buttons */}
-          <motion.div
-            variants={staggerItem}
-            className="mt-4 flex justify-center gap-3"
-          >
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleNewProject}
-              disabled={isProcessing}
-            >
-              <FolderPlus className="size-4" />
-              New Project
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleNewDesign}
-              disabled={isProcessing}
-            >
-              <Paintbrush className="size-4" />
-              New Design
-            </Button>
-          </motion.div>
+                <FolderPlus className="size-4" />
+                New Project +
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleNewDesign}
+                disabled={isProcessing}
+                className="flex-1"
+              >
+                <Paintbrush className="size-4" />
+                New Design +
+              </Button>
+            </motion.div>
+          </div>
         </motion.div>
 
         {/* ── Recents Section ──────────────────────────────────────────── */}
@@ -376,14 +399,16 @@ export function HomeContent() {
             duration: 0.5,
             ease: [0.25, 0.4, 0, 1] as [number, number, number, number],
           }}
-          className="mx-auto mt-14 max-w-5xl"
+          className="mx-auto max-w-6xl"
         >
           <Tabs
             value={tab}
             onValueChange={(v) => setTab(v as Tab)}
           >
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold tracking-tight">Recents</h2>
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                Recents
+              </h2>
               <TabsList variant="line">
                 <TabsTrigger value="all">All</TabsTrigger>
                 <TabsTrigger value="projects">Projects</TabsTrigger>
@@ -427,9 +452,7 @@ export function HomeContent() {
                     ),
                   )}
                   {recents.length >= 7 && (
-                    <ViewAllCard
-                      tab={tab}
-                    />
+                    <ViewAllCard tab={tab} />
                   )}
                 </div>
               )}

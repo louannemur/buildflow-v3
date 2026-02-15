@@ -13,7 +13,7 @@ export async function generateMetadata({
 }) {
   const { id, pageId } = await params;
   const session = await auth();
-  if (!session?.user) return { title: "Design | BuildFlow" };
+  if (!session?.user) return { title: "Design | Calypso" };
 
   const [project, page] = await Promise.all([
     db.query.projects.findFirst({
@@ -27,8 +27,8 @@ export async function generateMetadata({
   ]);
 
   const title = page?.title
-    ? `${page.title} — ${project?.name ?? "Project"} | BuildFlow`
-    : "Design | BuildFlow";
+    ? `${page.title} — ${project?.name ?? "Project"} | Calypso`
+    : "Design | Calypso";
 
   return { title };
 }
