@@ -93,13 +93,23 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.id = user.id;
       }
 
-      // Always read the plan from DB so it stays fresh after upgrades
+      // Always read user data from DB so it stays fresh after profile updates
       if (token.id) {
-        const sub = await db.query.subscriptions.findFirst({
-          where: eq(subscriptions.userId, token.id as string),
-          columns: { plan: true },
-        });
+        const [dbUser, sub] = await Promise.all([
+          db.query.users.findFirst({
+            where: eq(users.id, token.id as string),
+            columns: { name: true, image: true },
+          }),
+          db.query.subscriptions.findFirst({
+            where: eq(subscriptions.userId, token.id as string),
+            columns: { plan: true },
+          }),
+        ]);
         token.plan = sub?.plan ?? "free";
+        if (dbUser) {
+          token.name = dbUser.name;
+          token.picture = dbUser.image;
+        }
       }
 
       return token;
@@ -111,6 +121,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
       session.user.plan =
         (token.plan as "free" | "studio" | "pro" | "founding") ?? "free";
+      session.user.name = (token.name as string) ?? null;
+      session.user.image = (token.picture as string) ?? null;
       return session;
     },
   },
