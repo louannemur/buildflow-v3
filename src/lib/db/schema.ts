@@ -225,6 +225,7 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   designs: many(designs),
   buildConfig: one(buildConfigs),
   buildOutputs: many(buildOutputs),
+  publishedSite: one(publishedSites),
 }));
 
 // ─── Features ───────────────────────────────────────────────────────────────
@@ -489,3 +490,46 @@ export const buildOutputsRelations = relations(buildOutputs, ({ one }) => ({
     references: [buildConfigs.id],
   }),
 }));
+
+// ─── Published Sites ─────────────────────────────────────────────────────────
+
+export const publishedSites = pgTable("published_sites", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id")
+    .notNull()
+    .unique()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  buildOutputId: uuid("build_output_id")
+    .notNull()
+    .references(() => buildOutputs.id),
+  slug: text("slug").notNull().unique(),
+  vercelProjectId: text("vercel_project_id").notNull(),
+  vercelDeploymentId: text("vercel_deployment_id").notNull(),
+  url: text("url").notNull(),
+  status: text("status", {
+    enum: ["deploying", "ready", "failed", "deleted"],
+  })
+    .notNull()
+    .default("deploying"),
+  publishedAt: timestamp("published_at", { mode: "date" })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { mode: "date" })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
+
+export const publishedSitesRelations = relations(
+  publishedSites,
+  ({ one }) => ({
+    project: one(projects, {
+      fields: [publishedSites.projectId],
+      references: [projects.id],
+    }),
+    buildOutput: one(buildOutputs, {
+      fields: [publishedSites.buildOutputId],
+      references: [buildOutputs.id],
+    }),
+  }),
+);

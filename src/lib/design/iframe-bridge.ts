@@ -88,16 +88,52 @@ export function getIframeBridgeScript(): string {
     return tree;
   }
 
+  // ── Block all interactive behavior ──────────────────────────────
+  // In design mode, nothing should be interactive — only selectable.
+
+  // Block form submissions
+  document.addEventListener('submit', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
+
+  // Block focus on inputs/textareas/selects
+  document.addEventListener('focus', function(e) {
+    var tag = e.target && e.target.tagName && e.target.tagName.toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') {
+      e.target.blur();
+    }
+  }, true);
+
+  // Block mousedown on interactive elements (prevents drag, text selection in inputs, etc.)
+  document.addEventListener('mousedown', function(e) {
+    var t = e.target;
+    while (t && t !== document.body) {
+      var tag = t.tagName && t.tagName.toLowerCase();
+      if (tag === 'a' || tag === 'button' || tag === 'input' || tag === 'select' || tag === 'textarea') {
+        e.preventDefault();
+        break;
+      }
+      t = t.parentElement;
+    }
+  }, true);
+
+  // Inject cursor style so elements look selectable
+  var bfStyle = document.createElement('style');
+  bfStyle.textContent = '[data-bf-id] { cursor: default !important; }';
+  document.head.appendChild(bfStyle);
+
   // Track currently hovered element to prevent duplicate events
   var lastHoveredBfId = null;
 
-  // Event: click on bf-id element
+  // Event: click — always intercept, select nearest bf-id element
   document.addEventListener('click', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+
     var target = e.target;
     while (target && target !== document.body) {
       if (target.getAttribute && target.getAttribute('data-bf-id')) {
-        e.preventDefault();
-        e.stopPropagation();
         var info = getElementInfo(target);
         if (info) {
           window.parent.postMessage({

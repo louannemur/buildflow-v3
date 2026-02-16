@@ -344,16 +344,18 @@ export function ProjectOverview() {
         </div>
       </motion.div>
 
-      {/* Continue CTA */}
-      <motion.div variants={staggerItem} className="mb-8">
-        <Button
-          onClick={() => handleStepClick(project.currentStep as ProjectStep)}
-          size="sm"
-        >
-          Continue where you left off
-          <ArrowRight className="size-4" />
-        </Button>
-      </motion.div>
+      {/* Continue CTA — only if any step has been started */}
+      {Object.values(stepData).some((d) => d.count > 0) && (
+        <motion.div variants={staggerItem} className="mb-8">
+          <Button
+            onClick={() => handleStepClick(project.currentStep as ProjectStep)}
+            size="sm"
+          >
+            Continue where you left off
+            <ArrowRight className="size-4" />
+          </Button>
+        </motion.div>
+      )}
 
       {/* Quick stats + Step cards */}
       <motion.div

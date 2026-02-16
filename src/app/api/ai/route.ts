@@ -10,6 +10,7 @@ import {
   modifyElement,
   addSection,
   inferPageType,
+  reviewAndFixDesign,
 } from "@/lib/ai/design";
 
 /* ─── Helpers ──────────────────────────────────────────────────────── */
@@ -127,9 +128,11 @@ export async function POST(req: Request) {
     let result: string;
 
     switch (action) {
-      case "generate-design":
-        result = await generateDesign(data);
+      case "generate-design": {
+        const generated = await generateDesign(data);
+        result = await reviewAndFixDesign(generated);
         break;
+      }
 
       case "edit-design":
         result = await editDesign({

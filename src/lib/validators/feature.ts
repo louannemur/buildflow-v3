@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const createFeatureSchema = z.object({
   title: z.string().min(1, "Title is required").max(200),
-  description: z.string().min(1, "Description is required").max(1000),
+  description: z.string().max(1000).default(""),
 });
 
 export type CreateFeatureInput = z.infer<typeof createFeatureSchema>;

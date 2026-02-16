@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useCallback, useRef, useEffect } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { motion } from "framer-motion";
@@ -12,7 +12,6 @@ import {
   Wand2,
   Clock,
 } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -66,14 +65,17 @@ function formatRelativeDate(dateStr: string) {
 /* ═══════════════════════════════════════════════════════════════════════════ */
 
 export function DesignsContent() {
-  const { project, pages, designs, addDesign, loading } =
-    useProjectStore();
+  const {
+    project,
+    pages,
+    designs,
+    loading,
+    designGenerating: generating,
+    designGenProgress: genProgress,
+    designGenTotal: genTotal,
+    generateAllDesigns,
+  } = useProjectStore();
   const router = useRouter();
-
-  // Batch generation
-  const [generating, setGenerating] = useState(false);
-  const [genProgress, setGenProgress] = useState(0);
-  const [genTotal, setGenTotal] = useState(0);
 
   // Map pages to their designs
   const pageDesignMap = useMemo(() => {
@@ -112,44 +114,7 @@ export function DesignsContent() {
 
   // ─── Batch generate ───────────────────────────────────────────────
 
-  const handleGenerateAll = useCallback(async () => {
-    if (!project || pagesWithoutDesign.length === 0) return;
-
-    setGenerating(true);
-    setGenProgress(0);
-    setGenTotal(pagesWithoutDesign.length);
-
-    let completed = 0;
-
-    for (const page of pagesWithoutDesign) {
-      try {
-        const res = await fetch(
-          `/api/projects/${project.id}/designs/generate`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ pageId: page.id }),
-          },
-        );
-
-        if (res.ok) {
-          const design = await res.json();
-          addDesign(design);
-        }
-      } catch {
-        // Continue with remaining pages
-      }
-
-      completed++;
-      setGenProgress(completed);
-    }
-
-    if (completed === pagesWithoutDesign.length) {
-      toast.success(`Generated designs for ${completed} pages.`);
-    }
-
-    setGenerating(false);
-  }, [project, pagesWithoutDesign, addDesign]);
+  const handleGenerateAll = generateAllDesigns;
 
   // ─── Render ─────────────────────────────────────────────────────────
 
@@ -415,7 +380,7 @@ function HtmlPreview({ html }: { html: string }) {
       <iframe
         ref={iframeRef}
         title="Design preview"
-        className="origin-top-left border-none"
+        className="pointer-events-none origin-top-left border-none"
         style={{
           width: IFRAME_W,
           height: IFRAME_H,

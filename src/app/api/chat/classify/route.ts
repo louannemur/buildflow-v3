@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { anthropic } from "@/lib/ai";
 import { classifyMessageSchema } from "@/lib/validators/chat";
 
-const SYSTEM_PROMPT = `You are an intent classifier for Calypso, a web design and development tool.
+const SYSTEM_PROMPT = `You are an intent classifier and conversational assistant for Calypso, a web design and development tool.
 
 Classify the user's message into exactly one intent:
 - "new_project": The user wants to build a web app, site, or product (e.g., "build me a task manager", "I want to create a SaaS app")
@@ -11,9 +11,15 @@ Classify the user's message into exactly one intent:
 - "general": Anything else — questions, greetings, unclear requests
 
 Respond with ONLY a JSON object, no other text:
-{"intent": "<intent>", "name": "<short project/design name if applicable>", "description": "<one-sentence description if applicable>", "message": "<helpful response if intent is general>"}
+{"intent": "<intent>", "name": "<short project/design name>", "description": "<one-sentence description>", "message": "<your conversational response>", "suggestions": ["<suggestion 1>", "<suggestion 2>", "<suggestion 3>"]}
 
-For "general" intent, include a friendly message helping them use Calypso. For "new_project" and "new_design", extract a clear name and description from their request.`;
+Rules:
+- "message" is ALWAYS required. Keep it to 1-2 sentences. You will receive the full conversation history — use it to build on what was already discussed. NEVER repeat a question already asked. For "new_project"/"new_design", acknowledge new information and ASK a different specific question about scope or functionality — things that affect features, user flows, and pages (e.g., "Should it have user accounts and authentication?", "Do you need an admin dashboard?", "What's the core workflow for users?"). Do NOT ask about visual style — that comes later. For "general", write a helpful message guiding them. The message MUST end with a question.
+- "suggestions" is ALWAYS required. Provide 2-3 short suggestions (max 5 words each) that are direct ANSWERS to the question you asked in "message". They should be clickable responses the user can tap to reply.
+  - Example: if you ask "Should it have user accounts?", suggestions could be: ["Yes, with social login", "Simple email signup", "No accounts needed"]
+  - Example: if you ask "Do you need an admin panel?", suggestions could be: ["Yes, full admin dashboard", "Basic settings only", "Not needed"]
+  - For "general": suggest specific project or design ideas (e.g., "Portfolio website", "SaaS dashboard", "E-commerce store")
+- "name" and "description" are required for "new_project" and "new_design" intents.`;
 
 export async function POST(req: Request) {
   try {
@@ -32,11 +38,18 @@ export async function POST(req: Request) {
       );
     }
 
+    // Build full conversation history for context
+    const history = parsed.data.history ?? [];
+    const messages: { role: "user" | "assistant"; content: string }[] = [
+      ...history,
+      { role: "user", content: parsed.data.message },
+    ];
+
     const response = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 200,
+      max_tokens: 300,
       system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: parsed.data.message }],
+      messages,
     });
 
     const text =
@@ -60,6 +73,7 @@ export async function POST(req: Request) {
       name?: string;
       description?: string;
       message?: string;
+      suggestions?: string[];
     };
 
     return NextResponse.json(result, { status: 200 });

@@ -24,6 +24,11 @@ export function extractCodeFromResponse(text: string): string {
   return trimmed;
 }
 
+/** Case-insensitive indexOf helper */
+function indexOfCI(text: string, search: string): number {
+  return text.toLowerCase().indexOf(search.toLowerCase());
+}
+
 /** Extract HTML from AI response — looks for html code blocks or raw HTML documents */
 export function extractHtmlFromResponse(text: string): string {
   // Try ```html code block first
@@ -32,20 +37,20 @@ export function extractHtmlFromResponse(text: string): string {
   );
   if (htmlBlockMatch) {
     const inner = htmlBlockMatch[1].trim();
-    if (inner.includes('<!DOCTYPE') || inner.includes('<html')) {
+    if (indexOfCI(inner, '<!doctype') !== -1 || indexOfCI(inner, '<html') !== -1) {
       return inner;
     }
     // Could be a partial HTML snippet (for element/section responses)
     return inner;
   }
 
-  // Try to find raw HTML document in the text
-  const doctypeIndex = text.indexOf('<!DOCTYPE');
-  const htmlTagIndex = text.indexOf('<html');
+  // Try to find raw HTML document in the text (case-insensitive)
+  const doctypeIndex = indexOfCI(text, '<!doctype');
+  const htmlTagIndex = indexOfCI(text, '<html');
   const htmlStart = doctypeIndex !== -1 ? doctypeIndex : htmlTagIndex;
 
   if (htmlStart !== -1) {
-    const htmlEnd = text.lastIndexOf('</html>');
+    const htmlEnd = indexOfCI(text, '</html>');
     if (htmlEnd !== -1) {
       return text.slice(htmlStart, htmlEnd + '</html>'.length);
     }
@@ -63,8 +68,8 @@ export function extractHtmlFromStream(accumulated: string): {
   htmlContent: string;
   isComplete: boolean;
 } {
-  const doctypeIndex = accumulated.indexOf('<!DOCTYPE');
-  const htmlTagIndex = accumulated.indexOf('<html');
+  const doctypeIndex = indexOfCI(accumulated, '<!doctype');
+  const htmlTagIndex = indexOfCI(accumulated, '<html');
   const htmlStart = doctypeIndex !== -1 ? doctypeIndex : htmlTagIndex;
 
   if (htmlStart === -1) {
@@ -72,7 +77,7 @@ export function extractHtmlFromStream(accumulated: string): {
   }
 
   const htmlContent = accumulated.slice(htmlStart);
-  const isComplete = htmlContent.includes('</html>');
+  const isComplete = indexOfCI(htmlContent, '</html>') !== -1;
 
   return { htmlStarted: true, htmlContent, isComplete };
 }

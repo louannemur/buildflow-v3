@@ -22,6 +22,7 @@ import {
   Layers,
   LayoutGrid,
   MessageSquare,
+  History,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -104,6 +105,8 @@ export function Toolbar({
   const toggleComponents = useEditorStore((s) => s.toggleComponents);
   const showChat = useEditorStore((s) => s.showChat);
   const toggleChat = useEditorStore((s) => s.toggleChat);
+  const showHistory = useEditorStore((s) => s.showHistory);
+  const toggleHistory = useEditorStore((s) => s.toggleHistory);
 
   const canUndo = undoStack.length > 0;
   const canRedo = redoStack.length > 0;
@@ -382,7 +385,25 @@ export function Toolbar({
                 <MessageSquare className="size-3.5" />
               </button>
             </TooltipTrigger>
-            <TooltipContent>Chat history</TooltipContent>
+            <TooltipContent>AI Chat</TooltipContent>
+          </Tooltip>
+
+          {/* History toggle */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={toggleHistory}
+                className={cn(
+                  "flex size-7 items-center justify-center rounded-md transition-colors",
+                  showHistory
+                    ? "bg-accent text-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+                )}
+              >
+                <History className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Version history</TooltipContent>
           </Tooltip>
 
           <div className="mx-0.5 h-4 w-px bg-border/60" />

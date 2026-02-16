@@ -11,8 +11,13 @@ import { getIframeBridgeScript } from './iframe-bridge';
  * Detect if source is a complete HTML document (vs React/JSX code).
  */
 export function isHtmlDocument(source: string): boolean {
-  const trimmed = source.trim();
-  return trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html');
+  const trimmed = source.trim().toLowerCase();
+  return (
+    trimmed.startsWith('<!doctype') ||
+    trimmed.startsWith('<html') ||
+    trimmed.startsWith('<head') ||
+    trimmed.startsWith('<body')
+  );
 }
 
 /**

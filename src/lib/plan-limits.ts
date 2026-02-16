@@ -8,6 +8,7 @@ export interface PlanLimits {
   maxAiGenerationsPerMonth: number;
   canBuild: boolean;
   canEditCode: boolean;
+  canPublish: boolean;
 }
 
 const PLAN_LIMITS: Record<Plan, PlanLimits> = {
@@ -19,6 +20,7 @@ const PLAN_LIMITS: Record<Plan, PlanLimits> = {
     maxAiGenerationsPerMonth: 0,
     canBuild: false,
     canEditCode: false,
+    canPublish: false,
   },
   studio: {
     maxProjects: 1,
@@ -28,6 +30,7 @@ const PLAN_LIMITS: Record<Plan, PlanLimits> = {
     maxAiGenerationsPerMonth: 10,
     canBuild: false,
     canEditCode: true,
+    canPublish: false,
   },
   pro: {
     maxProjects: 10,
@@ -37,6 +40,7 @@ const PLAN_LIMITS: Record<Plan, PlanLimits> = {
     maxAiGenerationsPerMonth: 200,
     canBuild: true,
     canEditCode: true,
+    canPublish: true,
   },
   founding: {
     maxProjects: 10,
@@ -46,6 +50,7 @@ const PLAN_LIMITS: Record<Plan, PlanLimits> = {
     maxAiGenerationsPerMonth: Infinity,
     canBuild: true,
     canEditCode: true,
+    canPublish: true,
   },
 };
 

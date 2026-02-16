@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   FolderPlus,
   Paintbrush,
@@ -22,6 +22,11 @@ import { NetworkGraph } from "@/components/features/network-graph";
 import { UpgradeModal } from "@/components/features/upgrade-modal";
 import { ProjectCard } from "@/components/features/project-card";
 import { DesignCard } from "@/components/features/design-card";
+import {
+  HomeChatView,
+  type HomeChatMessage,
+  type DynamicSuggestion,
+} from "./home-chat-view";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { canCreateProject, type Plan } from "@/lib/plan-limits";
 import { cn } from "@/lib/utils";
@@ -47,6 +52,7 @@ type RecentItem =
     };
 
 type Tab = "all" | "projects" | "designs";
+type HomeMode = "hero" | "chat";
 
 /* ─── Animation variants ─────────────────────────────────────────────────── */
 
@@ -67,7 +73,7 @@ const staggerItem = {
   },
 };
 
-/* ─── Suggestion chips ───────────────────────────────────────────────────── */
+/* ─── Suggestion chips (hero mode) ──────────────────────────────────────── */
 
 const SUGGESTION_CHIPS = [
   { label: "Create a project", text: "Create a new project" },
@@ -101,9 +107,15 @@ export function HomeContent() {
   const { user, isLoading: authLoading } = useCurrentUser();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Mode (hero → chat on first message)
+  const [mode, setMode] = useState<HomeMode>("hero");
+
   // Chat state
   const [chatInput, setChatInput] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [messages, setMessages] = useState<HomeChatMessage[]>([]);
+  const [dynamicSuggestions, setDynamicSuggestions] = useState<DynamicSuggestion[]>([]);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Upgrade modal
   const [upgradeOpen, setUpgradeOpen] = useState(false);
@@ -114,6 +126,17 @@ export function HomeContent() {
   const [recents, setRecents] = useState<RecentItem[]>([]);
   const [recentsLoading, setRecentsLoading] = useState(true);
   const recentsCache = useRef<Partial<Record<Tab, RecentItem[]>>>({});
+
+  // ─── Auto-scroll chat (within container only) ───────────────────────
+
+  useEffect(() => {
+    if (mode === "chat" && messagesEndRef.current) {
+      const container = messagesEndRef.current.closest("[data-chat-scroll]");
+      if (container) {
+        container.scrollTop = container.scrollHeight;
+      }
+    }
+  }, [messages.length, mode]);
 
   // ─── Fetch recents ────────────────────────────────────────────────────
 
@@ -145,11 +168,22 @@ export function HomeContent() {
 
   // ─── Project creation ─────────────────────────────────────────────────
 
-  async function createProject(name: string, description?: string) {
-    const res = await fetch("/api/projects", {
+  async function createProject(
+    name: string,
+    description?: string,
+    history?: { role: string; content: string }[],
+  ) {
+    const hasHistory = history && history.length > 0;
+    const endpoint = hasHistory
+      ? "/api/projects/create-from-chat"
+      : "/api/projects";
+
+    const res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, description }),
+      body: JSON.stringify(
+        hasHistory ? { name, description, history } : { name, description },
+      ),
     });
 
     if (res.status === 403) {
@@ -193,49 +227,140 @@ export function HomeContent() {
     router.push(`/design/${design.id}`);
   }
 
+  // ─── Add assistant message helper ─────────────────────────────────────
+
+  function addAssistantMessage(
+    content: string,
+    intent: "new_project" | "new_design" | "general",
+    projectName?: string,
+    projectDescription?: string,
+  ) {
+    const msg: HomeChatMessage = {
+      id: `msg-${Date.now()}-assistant`,
+      role: "assistant",
+      content,
+      intent,
+      projectName,
+      projectDescription,
+    };
+    setMessages((prev) => [...prev, msg]);
+  }
+
   // ─── Chat submit ──────────────────────────────────────────────────────
 
   async function handleChatSubmit(text?: string) {
     const message = (text ?? chatInput).trim();
     if (!message || isProcessing) return;
 
+    // Add user message
+    const userMsg: HomeChatMessage = {
+      id: `msg-${Date.now()}-user`,
+      role: "user",
+      content: message,
+    };
+    setMessages((prev) => [...prev, userMsg]);
+    setChatInput("");
+    setDynamicSuggestions([]);
+
+    // Transition to chat mode on first message
+    if (mode === "hero") {
+      setMode("chat");
+    }
+
     setIsProcessing(true);
 
     try {
+      // Build conversation history from existing messages (user + assistant content only)
+      const history = messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
       const res = await fetch("/api/chat/classify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ message, history }),
       });
 
       if (!res.ok) {
-        toast.error("Something went wrong. Please try again.");
+        addAssistantMessage(
+          "Something went wrong. Please try again.",
+          "general",
+        );
         return;
       }
 
       const data = await res.json();
+      const aiSuggestions: string[] = data.suggestions ?? [];
+
+      // Build dynamic suggestion chips from AI response
+      // Only show the action button after at least one follow-up exchange
+      const hasEnoughContext = messages.length >= 3; // user→AI→user (+ this AI response coming)
+
+      function buildSuggestions(
+        intent: string,
+        suggestions: string[],
+        actionName?: string,
+      ): DynamicSuggestion[] {
+        const chips: DynamicSuggestion[] = suggestions.map((s) => ({
+          label: s,
+          action: "send_message" as const,
+          text: s,
+        }));
+
+        // Only show "go" action after enough conversation
+        if (hasEnoughContext) {
+          if (intent === "new_project") {
+            chips.push({ label: "Build everything", action: "create_project", text: actionName });
+          } else if (intent === "new_design") {
+            chips.push({ label: "Start designing", action: "create_design", text: actionName });
+          }
+        }
+
+        return chips;
+      }
 
       switch (data.intent) {
-        case "new_project":
-          setChatInput("");
-          await createProject(
-            data.name || "Untitled Project",
+        case "new_project": {
+          addAssistantMessage(
+            data.message || `I'd love to help you build **${data.name || "your project"}**!`,
+            "new_project",
+            data.name,
             data.description,
           );
+          setDynamicSuggestions(buildSuggestions("new_project", aiSuggestions, data.name));
           break;
-        case "new_design":
-          setChatInput("");
-          await createDesign(data.name || "Untitled Design");
+        }
+        case "new_design": {
+          addAssistantMessage(
+            data.message || `Let's design **${data.name || "your design"}**!`,
+            "new_design",
+            data.name,
+          );
+          setDynamicSuggestions(buildSuggestions("new_design", aiSuggestions, data.name));
           break;
-        case "general":
-          toast.info(
-            data.message ||
-              "Try describing a project or design you'd like to create!",
+        }
+        case "general": {
+          addAssistantMessage(
+            data.message || "Try describing a project or design you'd like to create!",
+            "general",
+          );
+          setDynamicSuggestions(
+            aiSuggestions.length > 0
+              ? aiSuggestions.map((s) => ({ label: s, action: "send_message" as const, text: s }))
+              : [
+                  { label: "Create a project", action: "send_message", text: "Create a new project" },
+                  { label: "Create a design", action: "send_message", text: "Create a new standalone design" },
+                ],
           );
           break;
+        }
       }
     } catch {
-      toast.error("Something went wrong. Please try again.");
+      addAssistantMessage(
+        "Something went wrong. Please try again.",
+        "general",
+      );
     } finally {
       setIsProcessing(false);
     }
@@ -248,7 +373,48 @@ export function HomeContent() {
     }
   }
 
-  // ─── Quick action handlers ────────────────────────────────────────────
+  // ─── Dynamic suggestion handler ────────────────────────────────────────
+
+  async function handleSuggestionClick(suggestion: DynamicSuggestion) {
+    switch (suggestion.action) {
+      case "create_project": {
+        const lastProjectMsg = [...messages]
+          .reverse()
+          .find((m) => m.role === "assistant" && m.intent === "new_project");
+        const history = messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        }));
+        setIsProcessing(true);
+        await createProject(
+          lastProjectMsg?.projectName || suggestion.text || "Untitled Project",
+          lastProjectMsg?.projectDescription,
+          history,
+        );
+        setIsProcessing(false);
+        break;
+      }
+      case "create_design": {
+        const lastDesignMsg = [...messages]
+          .reverse()
+          .find((m) => m.role === "assistant" && m.intent === "new_design");
+        setIsProcessing(true);
+        await createDesign(
+          lastDesignMsg?.projectName || suggestion.text || "Untitled Design",
+        );
+        setIsProcessing(false);
+        break;
+      }
+      case "send_message": {
+        if (suggestion.text) {
+          await handleChatSubmit(suggestion.text);
+        }
+        break;
+      }
+    }
+  }
+
+  // ─── Quick action handlers (hero mode) ─────────────────────────────────
 
   function handleNewProject() {
     const plan = (user?.plan ?? "free") as Plan;
@@ -273,124 +439,156 @@ export function HomeContent() {
   return (
     <>
       <div className="px-4 pb-16 sm:px-6">
-        {/* ── Hero — network graph + content ──────────────────────────── */}
-        <motion.div
-          initial="hidden"
-          animate="visible"
-          variants={staggerContainer}
-          className="mx-auto flex max-w-6xl items-center justify-center gap-12 py-10 lg:gap-20 lg:py-16"
-        >
-          {/* Network graph (left side, hidden on small screens) */}
-          <motion.div
-            variants={staggerItem}
-            className="hidden shrink-0 lg:block"
-            style={{ width: 420, height: 420 }}
-          >
-            <NetworkGraph isTalking={isProcessing} />
-          </motion.div>
+        <AnimatePresence mode="wait">
+          {mode === "hero" ? (
+            /* ── Hero — network graph + content ──────────────────────── */
+            <motion.div
+              key="hero"
+              initial="hidden"
+              animate="visible"
+              exit={{ opacity: 0, y: -20, transition: { duration: 0.3 } }}
+              variants={staggerContainer}
+              className="mx-auto flex max-w-6xl items-center justify-center gap-12 py-10 lg:gap-20 lg:py-16"
+            >
+              {/* Network graph (left side, hidden on small screens) */}
+              <motion.div
+                variants={staggerItem}
+                className="hidden shrink-0 lg:block"
+                style={{ width: 420, height: 420 }}
+              >
+                <NetworkGraph isTalking={isProcessing} />
+              </motion.div>
 
-          {/* Content (right side) */}
-          <div className="flex max-w-xl flex-1 flex-col">
-            {/* Greeting */}
-            <motion.div variants={staggerItem} className="flex items-start gap-3">
-              <span className="mt-2 text-xl text-muted-foreground">—</span>
-              <div>
-                <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-                  {authLoading ? (
-                    <Skeleton className="h-10 w-64" />
-                  ) : (
-                    <>Welcome back, {firstName}!</>
-                  )}
-                </h1>
-                <p className="mt-1 text-base text-muted-foreground">
-                  What shall we make today?
-                </p>
+              {/* Content (right side) */}
+              <div className="flex max-w-xl flex-1 flex-col">
+                {/* Greeting */}
+                <motion.div variants={staggerItem} className="flex items-start gap-3">
+                  <span className="mt-2 text-xl text-muted-foreground">—</span>
+                  <div>
+                    <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+                      {authLoading ? (
+                        <Skeleton className="h-10 w-64" />
+                      ) : (
+                        <>Welcome back, {firstName}!</>
+                      )}
+                    </h1>
+                    <p className="mt-1 text-base text-muted-foreground">
+                      What shall we make today?
+                    </p>
+                  </div>
+                </motion.div>
+
+                {/* Suggestion chips */}
+                <motion.div
+                  variants={staggerItem}
+                  className="ml-8 mt-5 flex flex-wrap gap-2"
+                >
+                  {SUGGESTION_CHIPS.map((chip) => (
+                    <button
+                      key={chip.label}
+                      onClick={() => handleChatSubmit(chip.text)}
+                      disabled={isProcessing}
+                      className="rounded-full border border-border bg-card px-4 py-2 text-sm text-foreground/80 transition-colors hover:border-primary hover:text-foreground disabled:opacity-50"
+                    >
+                      {chip.label}
+                    </button>
+                  ))}
+                </motion.div>
+
+                {/* Chat input */}
+                <motion.div variants={staggerItem} className="ml-8 mt-4">
+                  <div className="relative overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-colors focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/20">
+                    <textarea
+                      ref={textareaRef}
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      placeholder="Describe your vision..."
+                      disabled={isProcessing}
+                      rows={1}
+                      className={cn(
+                        "w-full resize-none bg-transparent px-4 py-3 pr-12 text-sm",
+                        "placeholder:text-muted-foreground/60",
+                        "focus:outline-none",
+                        "disabled:opacity-60",
+                        "min-h-[48px] max-h-[120px]",
+                      )}
+                      style={{ fieldSizing: "content" } as React.CSSProperties}
+                    />
+                    <button
+                      onClick={() => handleChatSubmit()}
+                      disabled={!chatInput.trim() || isProcessing}
+                      className={cn(
+                        "absolute bottom-2 right-2 flex size-8 items-center justify-center rounded-lg transition-colors",
+                        chatInput.trim() && !isProcessing
+                          ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                          : "text-muted-foreground/40",
+                      )}
+                    >
+                      {isProcessing ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Send className="size-4" />
+                      )}
+                    </button>
+                  </div>
+                </motion.div>
+
+                {/* Action buttons */}
+                <motion.div
+                  variants={staggerItem}
+                  className="ml-8 mt-4 flex gap-3"
+                >
+                  <Button
+                    onClick={handleNewProject}
+                    disabled={isProcessing}
+                    className="flex-1"
+                  >
+                    <FolderPlus className="size-4" />
+                    New Project +
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={handleNewDesign}
+                    disabled={isProcessing}
+                    className="flex-1"
+                  >
+                    <Paintbrush className="size-4" />
+                    New Design +
+                  </Button>
+                </motion.div>
               </div>
             </motion.div>
-
-            {/* Suggestion chips */}
+          ) : (
+            /* ── Chat view ───────────────────────────────────────────── */
             <motion.div
-              variants={staggerItem}
-              className="ml-8 mt-5 flex flex-wrap gap-2"
+              key="chat"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{
+                duration: 0.4,
+                ease: [0.25, 0.4, 0, 1] as [number, number, number, number],
+              }}
+              className="mx-auto max-w-3xl py-12"
             >
-              {SUGGESTION_CHIPS.map((chip) => (
-                <button
-                  key={chip.label}
-                  onClick={() => handleChatSubmit(chip.text)}
-                  disabled={isProcessing}
-                  className="rounded-full border border-border bg-card px-4 py-2 text-sm text-foreground/80 transition-colors hover:border-primary hover:text-foreground disabled:opacity-50"
-                >
-                  {chip.label}
-                </button>
-              ))}
+              <HomeChatView
+                messages={messages}
+                chatInput={chatInput}
+                setChatInput={setChatInput}
+                isProcessing={isProcessing}
+                onSubmit={handleChatSubmit}
+                onKeyDown={handleKeyDown}
+                dynamicSuggestions={dynamicSuggestions}
+                onSuggestionClick={handleSuggestionClick}
+                user={user}
+                messagesEndRef={messagesEndRef}
+                textareaRef={textareaRef}
+              />
             </motion.div>
+          )}
+        </AnimatePresence>
 
-            {/* Chat input */}
-            <motion.div variants={staggerItem} className="ml-8 mt-4">
-              <div className="relative overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-colors focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/20">
-                <textarea
-                  ref={textareaRef}
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Describe your vision..."
-                  disabled={isProcessing}
-                  rows={1}
-                  className={cn(
-                    "w-full resize-none bg-transparent px-4 py-3 pr-12 text-sm",
-                    "placeholder:text-muted-foreground/60",
-                    "focus:outline-none",
-                    "disabled:opacity-60",
-                    "min-h-[48px] max-h-[120px]",
-                  )}
-                  style={{ fieldSizing: "content" } as React.CSSProperties}
-                />
-                <button
-                  onClick={() => handleChatSubmit()}
-                  disabled={!chatInput.trim() || isProcessing}
-                  className={cn(
-                    "absolute bottom-2 right-2 flex size-8 items-center justify-center rounded-lg transition-colors",
-                    chatInput.trim() && !isProcessing
-                      ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                      : "text-muted-foreground/40",
-                  )}
-                >
-                  {isProcessing ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <Send className="size-4" />
-                  )}
-                </button>
-              </div>
-            </motion.div>
-
-            {/* Action buttons */}
-            <motion.div
-              variants={staggerItem}
-              className="ml-8 mt-4 flex gap-3"
-            >
-              <Button
-                onClick={handleNewProject}
-                disabled={isProcessing}
-                className="flex-1"
-              >
-                <FolderPlus className="size-4" />
-                New Project +
-              </Button>
-              <Button
-                variant="outline"
-                onClick={handleNewDesign}
-                disabled={isProcessing}
-                className="flex-1"
-              >
-                <Paintbrush className="size-4" />
-                New Design +
-              </Button>
-            </motion.div>
-          </div>
-        </motion.div>
-
-        {/* ── Recents Section ──────────────────────────────────────────── */}
+        {/* ── Recents Section (always visible) ──────────────────────── */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}

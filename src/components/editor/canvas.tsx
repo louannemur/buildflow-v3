@@ -7,6 +7,7 @@ import type { EditorElement } from "@/lib/editor/store";
 import { generatePreviewHtml, prepareHtmlForPreview, isHtmlDocument } from "@/lib/design/preview-transform";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
+import { SelectionOverlay } from "./SelectionOverlay";
 
 interface CanvasProps {
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
@@ -25,6 +26,8 @@ export function Canvas({ iframeRef }: CanvasProps) {
   const setIframeScroll = useEditorStore((s) => s.setIframeScroll);
   const setMode = useEditorStore((s) => s.setMode);
   const isStreamingToIframe = useEditorStore((s) => s.isStreamingToIframe);
+  const selectedElement = useEditorStore((s) => s.selectedElement);
+  const hoveredElement = useEditorStore((s) => s.hoveredElement);
   const { user } = useCurrentUser();
   const isFreePlan = !user?.plan || user.plan === "free";
 
@@ -67,9 +70,29 @@ export function Canvas({ iframeRef }: CanvasProps) {
     try {
       // Generate complete preview HTML with optional bridge for design mode
       let html: string;
+      const trimmedSource = source.trim();
+      const lowerSource = trimmedSource.toLowerCase();
+
       if (isHtmlDocument(source)) {
+        // Full HTML document — render directly
         html = prepareHtmlForPreview(source, { enableBridge: mode === "design" });
+      } else if (
+        lowerSource.includes('<!doctype') || lowerSource.includes('<html')
+      ) {
+        // HTML document with leading content — extract and render
+        const doctypeIdx = lowerSource.indexOf('<!doctype');
+        const htmlIdx = lowerSource.indexOf('<html');
+        const start = doctypeIdx !== -1 ? doctypeIdx : htmlIdx;
+        html = prepareHtmlForPreview(trimmedSource.slice(start), { enableBridge: mode === "design" });
+      } else if (
+        trimmedSource.startsWith('<') &&
+        !/^(import\s|'use client'|"use client"|export\s|function\s|const\s|class\s)/.test(trimmedSource)
+      ) {
+        // HTML fragment (e.g. from corrupted element edit) — wrap in document
+        const wrapped = `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width, initial-scale=1.0">\n<script src="https://cdn.tailwindcss.com"><\/script>\n</head>\n<body>\n${source}\n</body>\n</html>`;
+        html = prepareHtmlForPreview(wrapped, { enableBridge: mode === "design" });
       } else {
+        // Legacy React/JSX code
         html = generatePreviewHtml(source, { enableBridge: mode === "design" });
       }
 
@@ -136,6 +159,25 @@ export function Canvas({ iframeRef }: CanvasProps) {
 
         case "SCROLL_UPDATE":
           setIframeScroll(data.scrollTop || 0, data.scrollLeft || 0);
+          // Re-query selected element to get fresh viewport-relative rect
+          {
+            const selId = useEditorStore.getState().selectedBfId;
+            if (selId && iframeRef.current?.contentWindow) {
+              iframeRef.current.contentWindow.postMessage(
+                { type: "GET_ELEMENT", bfId: selId },
+                "*",
+              );
+            }
+          }
+          break;
+
+        case "ELEMENT_DATA":
+          if (data.element) {
+            const state = useEditorStore.getState();
+            if (data.bfId === state.selectedBfId) {
+              setSelectedElement(data.element as EditorElement);
+            }
+          }
           break;
 
         case "READY":
@@ -220,13 +262,21 @@ export function Canvas({ iframeRef }: CanvasProps) {
           }}
         >
           {source ? (
-            <iframe
-              ref={iframeRef}
-              title="Design canvas"
-              className="block h-full w-full border-none"
-              sandbox="allow-scripts allow-same-origin"
-              tabIndex={-1}
-            />
+            <>
+              <iframe
+                ref={iframeRef}
+                title="Design canvas"
+                className="block h-full w-full border-none"
+                sandbox="allow-scripts allow-same-origin"
+                tabIndex={-1}
+              />
+              {mode === "design" && (
+                <SelectionOverlay
+                  selectedElement={selectedElement}
+                  hoveredElement={hoveredElement}
+                />
+              )}
+            </>
           ) : (
             <div className="flex h-full w-full items-center justify-center">
               <div className="text-center">

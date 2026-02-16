@@ -1,11 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { Check, X, ArrowRight, Sparkles, Clock } from "lucide-react";
+import { Check, X, ArrowRight, Sparkles, Clock, Loader2, CreditCard } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Accordion,
   AccordionContent,
@@ -200,6 +209,18 @@ function getCtaState(
   return { label: "Downgrade", variant: "outline", disabled: false };
 }
 
+/* ─── Upgrade preview types ──────────────────────────────────────────────── */
+
+interface UpgradePreview {
+  planName: string;
+  newPrice: number;
+  interval: string;
+  prorationAmount: number;
+  immediateCharge: number;
+  nextBillingDate: string;
+  paymentMethod: { brand: string; last4: string } | null;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════ */
 /*  Pricing content                                                          */
 /* ═══════════════════════════════════════════════════════════════════════════ */
@@ -207,10 +228,59 @@ function getCtaState(
 export function PricingContent() {
   const [yearly, setYearly] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, isAuthenticated } = useCurrentUser();
   const currentPlan = isAuthenticated ? (user?.plan ?? "free") : undefined;
 
-  const [portalLoading, setPortalLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  // Upgrade confirmation modal state
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+  const [preview, setPreview] = useState<UpgradePreview | null>(null);
+  const [pendingPlan, setPendingPlan] = useState<{ key: PlanKey; interval: string } | null>(null);
+
+  const fetchPreviewAndOpen = useCallback(async (planKey: PlanKey, interval: string) => {
+    setLoading(true);
+    setPendingPlan({ key: planKey, interval });
+
+    try {
+      const res = await fetch("/api/stripe/preview-upgrade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ planName: planKey, interval }),
+      });
+      const data = await res.json();
+
+      if (data.error) {
+        toast.error(data.error);
+        return;
+      }
+
+      setPreview(data);
+      setConfirmOpen(true);
+    } catch {
+      toast.error("Failed to load upgrade details. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Re-open modal when returning from Stripe portal
+  useEffect(() => {
+    const confirmPlanParam = searchParams.get("confirmPlan") as PlanKey | null;
+    const confirmIntervalParam = searchParams.get("confirmInterval");
+    if (confirmPlanParam && confirmIntervalParam && isAuthenticated && currentPlan && currentPlan !== "free") {
+      // Clean URL params without triggering navigation
+      const url = new URL(window.location.href);
+      url.searchParams.delete("confirmPlan");
+      url.searchParams.delete("confirmInterval");
+      window.history.replaceState({}, "", url.pathname);
+
+      if (confirmIntervalParam === "yearly") setYearly(true);
+      fetchPreviewAndOpen(confirmPlanParam, confirmIntervalParam);
+    }
+  }, [searchParams, isAuthenticated, currentPlan, fetchPreviewAndOpen]);
 
   async function handleCheckout(planKey: PlanKey) {
     if (!isAuthenticated) {
@@ -220,25 +290,59 @@ export function PricingContent() {
 
     if (planKey === "free" || planKey === currentPlan) return;
 
-    // Existing paid subscriber → open Stripe billing portal to change plan
+    const interval = yearly ? "yearly" : "monthly";
+
+    // Existing paid subscriber → show confirmation modal with proration preview
     if (currentPlan && currentPlan !== "free") {
-      setPortalLoading(true);
-      try {
-        const res = await fetch("/api/stripe/portal", { method: "POST" });
-        const data = await res.json();
-        if (data.url) {
-          window.location.href = data.url;
-          return;
-        }
-      } catch {
-        // Fall through to checkout
-      } finally {
-        setPortalLoading(false);
-      }
+      await fetchPreviewAndOpen(planKey, interval);
+      return;
     }
 
-    const interval = yearly ? "yearly" : "monthly";
     router.push(`/checkout?plan=${planKey}&interval=${interval}`);
+  }
+
+  async function handleConfirmUpgrade() {
+    if (!pendingPlan) return;
+
+    setConfirmLoading(true);
+    try {
+      const res = await fetch("/api/stripe/update-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ planName: pendingPlan.key, interval: pendingPlan.interval }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        setConfirmOpen(false);
+        toast.success(`Successfully switched to ${preview?.planName}!`);
+        router.push("/settings/billing");
+      } else {
+        toast.error(data.error || "Failed to update plan.");
+      }
+    } catch {
+      toast.error("Something went wrong. Please try again.");
+    } finally {
+      setConfirmLoading(false);
+    }
+  }
+
+  async function handleManageBilling() {
+    if (!pendingPlan) return;
+    try {
+      const returnTo = `/pricing?confirmPlan=${pendingPlan.key}&confirmInterval=${pendingPlan.interval}`;
+      const res = await fetch("/api/stripe/portal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ flow: "payment_method_update", returnTo }),
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      }
+    } catch {
+      toast.error("Failed to open billing portal.");
+    }
   }
 
   return (
@@ -419,11 +523,11 @@ export function PricingContent() {
                       variant={cta.variant}
                       size="sm"
                       className="w-full"
-                      disabled={cta.disabled || portalLoading}
+                      disabled={cta.disabled || loading}
                       onClick={() => handleCheckout(tier.key)}
                     >
-                      {portalLoading && !cta.disabled ? "Redirecting..." : cta.label}
-                      {!cta.disabled && !portalLoading && <ArrowRight className="size-3.5" />}
+                      {loading && !cta.disabled ? "Loading..." : cta.label}
+                      {!cta.disabled && !loading && <ArrowRight className="size-3.5" />}
                     </Button>
                   )}
                 </div>
@@ -493,6 +597,104 @@ export function PricingContent() {
           </motion.div>
         </motion.div>
       </div>
+
+      {/* ── Upgrade Confirmation Modal ───────────────────────────────────── */}
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {preview ? `Switch to ${preview.planName}` : "Confirm plan change"}
+            </DialogTitle>
+            <DialogDescription>
+              Review the details below before confirming your plan change.
+            </DialogDescription>
+          </DialogHeader>
+
+          {preview && (
+            <div className="space-y-4 py-2">
+              {/* New plan details */}
+              <div className="rounded-lg border border-border/60 bg-muted/50 p-4">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-sm font-medium">{preview.planName}</span>
+                  <span className="text-lg font-bold">
+                    ${preview.newPrice.toFixed(2)}
+                    <span className="text-sm font-normal text-muted-foreground">
+                      /{preview.interval === "yearly" ? "year" : "month"}
+                    </span>
+                  </span>
+                </div>
+              </div>
+
+              {/* Proration info */}
+              {preview.immediateCharge > 0 && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Due today (prorated)</span>
+                  <span className="font-medium">${preview.immediateCharge.toFixed(2)}</span>
+                </div>
+              )}
+              {preview.prorationAmount < 0 && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Credit applied</span>
+                  <span className="font-medium text-success">
+                    -${Math.abs(preview.prorationAmount).toFixed(2)}
+                  </span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Next billing date</span>
+                <span>{preview.nextBillingDate}</span>
+              </div>
+
+              <div className="h-px bg-border/60" />
+
+              {/* Payment method */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm">
+                  <CreditCard className="size-3.5 text-muted-foreground" />
+                  {preview.paymentMethod ? (
+                    <span>
+                      <span className="capitalize">{preview.paymentMethod.brand}</span>
+                      {" "}ending in {preview.paymentMethod.last4}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">No payment method</span>
+                  )}
+                </div>
+                <button
+                  onClick={handleManageBilling}
+                  className="text-sm text-primary transition-colors hover:text-primary/80"
+                >
+                  Change
+                </button>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setConfirmOpen(false)}
+              disabled={confirmLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirmUpgrade}
+              disabled={confirmLoading}
+            >
+              {confirmLoading ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                "Confirm change"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -27,7 +27,9 @@ import {
   Palette,
   Hammer,
   ChevronRight,
-  Pencil,
+  ChevronDown,
+  ArrowLeft,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -82,7 +84,7 @@ export interface ProjectData {
 
 interface ProjectContextValue {
   project: ProjectData;
-  activeStep: ProjectStep;
+  activeStep: ProjectStep | null;
   setActiveStep: (step: ProjectStep) => void;
   activeItemId: string | null;
   setActiveItemId: (id: string | null) => void;
@@ -107,9 +109,9 @@ const steps: {
   itemsKey: keyof Pick<ProjectData, "features" | "userFlows" | "pages" | "designs">;
 }[] = [
   { key: "features", label: "Features", icon: Lightbulb, itemsKey: "features" },
-  { key: "flows", label: "User Flows", icon: GitBranch, itemsKey: "userFlows" },
-  { key: "pages", label: "Pages & Content", icon: FileText, itemsKey: "pages" },
-  { key: "designs", label: "Designs", icon: Palette, itemsKey: "designs" },
+  { key: "flows", label: "User Flow", icon: GitBranch, itemsKey: "userFlows" },
+  { key: "pages", label: "Content", icon: FileText, itemsKey: "pages" },
+  { key: "designs", label: "Design", icon: Palette, itemsKey: "designs" },
 ];
 
 const buildStep = { key: "build" as const, label: "Build", icon: Hammer };
@@ -207,12 +209,14 @@ function SidebarContent({
   project,
   activeStep,
   onStepClick,
+  onOverviewClick,
   activeItemId,
   onItemClick,
 }: {
   project: ProjectData;
-  activeStep: ProjectStep;
+  activeStep: ProjectStep | null;
   onStepClick: (step: ProjectStep) => void;
+  onOverviewClick: () => void;
   activeItemId: string | null;
   onItemClick: (step: ProjectStep, itemId: string) => void;
 }) {
@@ -224,7 +228,18 @@ function SidebarContent({
   const storeDesigns = useProjectStore((s) => s.designs);
 
   const displayName = storeProject?.name ?? project.name;
-  const displayDesc = storeProject?.description ?? project.description;
+
+  // Track which step is expanded (independent of active/navigation)
+  const [expandedStep, setExpandedStep] = useState<ProjectStep | null>(activeStep);
+  const [lastSyncedStep, setLastSyncedStep] = useState<ProjectStep | null>(activeStep);
+
+  // Only force-expand when activeStep actually changes to a new value
+  if (activeStep !== lastSyncedStep) {
+    setLastSyncedStep(activeStep);
+    if (activeStep) {
+      setExpandedStep(activeStep);
+    }
+  }
 
   // Build live sidebar items from store, falling back to static prop
   const liveItems: Record<string, ProjectItem[]> = {
@@ -242,103 +257,120 @@ function SidebarContent({
       : project.designs,
   };
 
+  function handleStepToggle(step: ProjectStep) {
+    if (expandedStep === step) {
+      // Already expanded — collapse it
+      setExpandedStep(null);
+    } else {
+      // Expand this step and navigate to it
+      setExpandedStep(step);
+      onStepClick(step);
+    }
+  }
+
   return (
     <div className="flex h-full flex-col">
-      {/* Project header */}
-      <div className="border-b border-border/50 p-4">
-        <div className="group flex items-start gap-2">
-          <div className="min-w-0 flex-1">
-            <h2 className="truncate text-sm font-semibold leading-tight">
-              {displayName}
-            </h2>
-            {displayDesc && (
-              <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                {displayDesc}
-              </p>
-            )}
-          </div>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
-            title="Edit project"
-          >
-            <Pencil />
-          </Button>
-        </div>
+      {/* Back to projects */}
+      <div className="px-4 pt-3">
+        <Link
+          href="/projects"
+          className="inline-flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ArrowLeft className="size-3" />
+          Back to Projects
+        </Link>
+      </div>
+
+      {/* Project name */}
+      <div className="px-4 pb-1.5 pt-2">
+        <button
+          onClick={onOverviewClick}
+          className="group flex w-full items-center justify-between text-left"
+        >
+          <h2 className={cn(
+            "truncate text-sm font-bold leading-tight",
+            activeStep === null && "text-primary",
+          )}>
+            {displayName}
+          </h2>
+          <Sparkles className="size-3.5 shrink-0 text-primary/60" />
+        </button>
       </div>
 
       {/* Step navigation */}
-      <nav className="flex-1 overflow-y-auto p-2">
-        <div className="space-y-0.5">
+      <nav className="flex-1 overflow-y-auto px-2 pt-0.5">
+        <div>
           {steps.map((step) => {
-            const Icon = step.icon;
             const items = liveItems[step.itemsKey] ?? project[step.itemsKey];
             const isActive = activeStep === step.key;
+            const isExpanded = expandedStep === step.key;
 
             return (
-              <Collapsible key={step.key} open={isActive}>
-                <CollapsibleTrigger asChild>
-                  <button
-                    onClick={() => onStepClick(step.key)}
-                    className={cn(
-                      "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors",
-                      isActive
-                        ? "bg-accent text-accent-foreground"
-                        : "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
-                    )}
-                  >
-                    <Icon className="size-4 shrink-0" />
-                    <span className="flex-1 truncate text-left">
-                      {step.label}
-                    </span>
-                    {items.length > 0 && (
-                      <ChevronRight
-                        className={cn(
-                          "size-3.5 shrink-0 text-muted-foreground/50 transition-transform duration-200",
-                          isActive && "rotate-90"
-                        )}
-                      />
-                    )}
-                  </button>
-                </CollapsibleTrigger>
-                {items.length > 0 && (
-                  <CollapsibleContent>
-                    <div className="ml-4 mt-0.5 space-y-0.5 border-l border-border/50 pl-2.5">
-                      {items.map((item) => (
-                        <button
-                          key={item.id}
-                          onClick={() => onItemClick(step.key, item.id)}
-                          className={cn(
-                            "flex w-full items-center rounded-md px-2 py-1 text-xs transition-colors",
-                            activeItemId === item.id
-                              ? "bg-primary/10 font-medium text-primary"
-                              : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-                          )}
-                        >
-                          <span className="truncate">{item.title}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </CollapsibleContent>
-                )}
+              <Collapsible
+                key={step.key}
+                open={isExpanded && items.length > 0}
+                onOpenChange={() => handleStepToggle(step.key)}
+              >
+                <div className="border-b border-primary/15">
+                  <CollapsibleTrigger asChild>
+                    <button
+                      className={cn(
+                        "flex w-full items-center justify-between rounded-md px-2 py-2.5 text-sm font-semibold transition-colors",
+                        isActive
+                          ? "bg-primary/8 text-primary"
+                          : "text-foreground hover:text-primary"
+                      )}
+                    >
+                      <span className="truncate">
+                        {step.label}
+                      </span>
+                      {isExpanded && items.length > 0 ? (
+                        <ChevronDown className="size-3.5 shrink-0 text-primary" />
+                      ) : (
+                        <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/60" />
+                      )}
+                    </button>
+                  </CollapsibleTrigger>
+                  {items.length > 0 && (
+                    <CollapsibleContent>
+                      <div className="space-y-0.5 pb-2 pl-2">
+                        {items.map((item) => (
+                          <button
+                            key={item.id}
+                            onClick={() => onItemClick(step.key, item.id)}
+                            className={cn(
+                              "flex w-full items-center rounded-md px-2 py-1.5 text-xs transition-colors",
+                              activeItemId === item.id
+                                ? "font-medium text-primary"
+                                : "text-muted-foreground hover:text-foreground"
+                            )}
+                          >
+                            <span className="truncate">{item.title}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </CollapsibleContent>
+                  )}
+                </div>
               </Collapsible>
             );
           })}
 
           {/* Build step (no items) */}
-          <button
-            onClick={() => onStepClick(buildStep.key)}
-            className={cn(
-              "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors",
-              activeStep === buildStep.key
-                ? "bg-accent text-accent-foreground"
-                : "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
-            )}
-          >
-            <Hammer className="size-4 shrink-0" />
-            <span className="flex-1 truncate text-left">{buildStep.label}</span>
-          </button>
+          <div className="border-b border-primary/15">
+            <button
+              onClick={() => onStepClick(buildStep.key)}
+              className={cn(
+                "flex w-full items-center justify-between rounded-md px-2 py-2.5 text-sm font-semibold transition-colors",
+                activeStep === buildStep.key
+                  ? "bg-primary/8 text-primary"
+                  : "text-foreground hover:text-primary"
+              )}
+            >
+              <span className="truncate">{buildStep.label}</span>
+              <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/60" />
+            </button>
+          </div>
         </div>
       </nav>
     </div>
@@ -367,15 +399,19 @@ export function ProjectLayout({
     ? (lastSegment as ProjectStep)
     : null;
 
-  const [activeStep, setActiveStepState] = useState<ProjectStep>(
-    stepFromPath ?? project.currentStep
+  // null = overview page (base project URL with no step segment)
+  const isBasePath = /^\/project\/[^/]+$/.test(pathname);
+  const [activeStep, setActiveStepState] = useState<ProjectStep | null>(
+    stepFromPath ?? (isBasePath ? null : project.currentStep)
   );
   const [activeItemId, setActiveItemId] = useState<string | null>(
     searchParams.get("item")
   );
 
   // Keep activeStep in sync when URL changes
-  if (stepFromPath && stepFromPath !== activeStep) {
+  if (isBasePath && activeStep !== null) {
+    setActiveStepState(null);
+  } else if (stepFromPath && stepFromPath !== activeStep) {
     setActiveStepState(stepFromPath);
   }
 
@@ -390,6 +426,12 @@ export function ProjectLayout({
     },
     [projectBasePath, router]
   );
+
+  const goToOverview = useCallback(() => {
+    setActiveStepState(null);
+    setActiveItemId(null);
+    router.push(projectBasePath);
+  }, [projectBasePath, router]);
 
   const handleItemClick = useCallback(
     (step: ProjectStep, itemId: string) => {
@@ -408,6 +450,11 @@ export function ProjectLayout({
     },
     [setActiveStep]
   );
+
+  const handleOverviewClick = useCallback(() => {
+    goToOverview();
+    setMobileOpen(false);
+  }, [goToOverview]);
 
   return (
     <ProjectContext.Provider
@@ -440,6 +487,7 @@ export function ProjectLayout({
                     project={project}
                     activeStep={activeStep}
                     onStepClick={handleStepClick}
+                    onOverviewClick={handleOverviewClick}
                     activeItemId={activeItemId}
                     onItemClick={handleItemClick}
                   />
@@ -503,6 +551,7 @@ export function ProjectLayout({
                 project={project}
                 activeStep={activeStep}
                 onStepClick={handleStepClick}
+                onOverviewClick={handleOverviewClick}
                 activeItemId={activeItemId}
                 onItemClick={handleItemClick}
               />

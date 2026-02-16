@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { X } from "lucide-react";
 import { useEditorStore } from "@/lib/editor/store";
 import {
   addClassToElement,
@@ -64,7 +65,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 export function PropertiesPanel({ designCode, onCodeChange }: PropertiesPanelProps) {
-  const { selectedElement, selectedBfId } = useEditorStore();
+  const { selectedElement, selectedBfId, setSelectedBfId, toggleProperties } = useEditorStore();
 
   const [addClassCategory, setAddClassCategory] = React.useState<string | null>(null);
   const [addClassValue, setAddClassValue] = React.useState("");
@@ -153,7 +154,15 @@ export function PropertiesPanel({ designCode, onCodeChange }: PropertiesPanelPro
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
         <h3 className="text-xs font-semibold">Properties</h3>
-        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{selectedElement.tag}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{selectedElement.tag}</span>
+          <button
+            onClick={() => { setSelectedBfId(null); toggleProperties(); }}
+            className="flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <X className="size-3" />
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-4">

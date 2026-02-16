@@ -64,6 +64,7 @@ export interface EditorState {
   showProperties: boolean;
   showComponents: boolean;
   showChat: boolean;
+  showHistory: boolean;
 
   // Undo/redo stacks
   undoStack: string[];
@@ -103,6 +104,8 @@ export interface EditorState {
   toggleProperties: () => void;
   toggleComponents: () => void;
   toggleChat: () => void;
+  setShowChat: (show: boolean) => void;
+  toggleHistory: () => void;
 
   // History
   pushUndo: (code: string) => void;
@@ -145,6 +148,7 @@ const initialState = {
   showProperties: false,
   showComponents: false,
   showChat: false,
+  showHistory: false,
   undoStack: [] as string[],
   redoStack: [] as string[],
   styleGuideCode: null as string | null,
@@ -253,6 +257,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   toggleProperties: () => set((s) => ({ showProperties: !s.showProperties })),
   toggleComponents: () => set((s) => ({ showComponents: !s.showComponents })),
   toggleChat: () => set((s) => ({ showChat: !s.showChat })),
+  setShowChat: (show) => set({ showChat: show }),
+  toggleHistory: () => set((s) => ({ showHistory: !s.showHistory })),
 
   // ─── Undo/Redo ──────────────────────────────────────────────
   pushUndo: (code) => {

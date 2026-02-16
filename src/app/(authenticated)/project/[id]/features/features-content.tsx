@@ -3,39 +3,19 @@
 import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from "@dnd-kit/core";
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import {
   Sparkles,
   Plus,
-  GripVertical,
   Pencil,
   Trash2,
   Loader2,
   Lightbulb,
-  Check,
-  X,
   RefreshCw,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
@@ -64,18 +44,49 @@ import { UpgradeModal } from "@/components/features/upgrade-modal";
 
 /* ─── Animation ──────────────────────────────────────────────────────────── */
 
-const listItem = {
-  hidden: { opacity: 0, y: 12 },
+const container = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: { staggerChildren: 0.05 },
+  },
+};
+
+const cardItem = {
+  hidden: { opacity: 0, y: 16, scale: 0.97 },
   visible: {
     opacity: 1,
     y: 0,
+    scale: 1,
     transition: {
       duration: 0.3,
       ease: [0.25, 0.4, 0, 1] as [number, number, number, number],
     },
   },
-  exit: { opacity: 0, x: -20, transition: { duration: 0.2 } },
+  exit: { opacity: 0, scale: 0.95, transition: { duration: 0.2 } },
 };
+
+/* ─── Helpers ─────────────────────────────────────────────────────────── */
+
+/** Split a feature description into bullet points by sentence or line break. */
+function descriptionToBullets(description: string): string[] {
+  // First try splitting by newlines
+  const lines = description
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length > 1) return lines;
+
+  // Then split by sentence-ending punctuation
+  const sentences = description
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (sentences.length > 1) return sentences;
+
+  // Return as single item
+  return [description];
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
 /*  Features content                                                         */
@@ -100,25 +111,20 @@ export function FeaturesContent() {
   const [deleteTarget, setDeleteTarget] = useState<ProjectFeature | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Edit state
-  const [editingId, setEditingId] = useState<string | null>(null);
+  // Edit dialog state
+  const [editTarget, setEditTarget] = useState<ProjectFeature | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editDesc, setEditDesc] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
   // Add dialog state
   const [addTitle, setAddTitle] = useState("");
   const [addDesc, setAddDesc] = useState("");
+  const [pendingFeatures, setPendingFeatures] = useState<{ title: string; description: string }[]>([]);
   const [isAdding, setIsAdding] = useState(false);
-
-  // Drag and drop
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 5 },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    }),
-  );
+  const [editingPendingIndex, setEditingPendingIndex] = useState<number | null>(null);
+  const [editingPendingTitle, setEditingPendingTitle] = useState("");
+  const [editingPendingDesc, setEditingPendingDesc] = useState("");
 
   // ─── AI Generation ──────────────────────────────────────────────────
 
@@ -163,64 +169,114 @@ export function FeaturesContent() {
 
   // ─── Add feature ───────────────────────────────────────────────────
 
-  async function handleAdd() {
-    if (!project || !addTitle.trim() || !addDesc.trim()) return;
+  function handleAddAnother() {
+    if (!addTitle.trim()) return;
+    setPendingFeatures((prev) => [
+      ...prev,
+      { title: addTitle.trim(), description: addDesc.trim() || "" },
+    ]);
+    setAddTitle("");
+    setAddDesc("");
+  }
+
+  function handleRemovePending(index: number) {
+    setPendingFeatures((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function handleEditPending(index: number) {
+    const pf = pendingFeatures[index];
+    setEditingPendingIndex(index);
+    setEditingPendingTitle(pf.title);
+    setEditingPendingDesc(pf.description);
+  }
+
+  function handleSavePendingEdit() {
+    if (editingPendingIndex === null || !editingPendingTitle.trim()) return;
+    setPendingFeatures((prev) =>
+      prev.map((pf, i) =>
+        i === editingPendingIndex
+          ? { title: editingPendingTitle.trim(), description: editingPendingDesc.trim() }
+          : pf,
+      ),
+    );
+    setEditingPendingIndex(null);
+  }
+
+  function handleCancelPendingEdit() {
+    setEditingPendingIndex(null);
+  }
+
+  async function handleSaveFeatures() {
+    if (!project) return;
+
+    // Include current fields if title is filled
+    const allFeatures = [...pendingFeatures];
+    if (addTitle.trim()) {
+      allFeatures.push({ title: addTitle.trim(), description: addDesc.trim() || "" });
+    }
+
+    if (allFeatures.length === 0) return;
+
     setIsAdding(true);
+    let addedCount = 0;
 
     try {
-      const res = await fetch(`/api/projects/${project.id}/features`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: addTitle.trim(),
-          description: addDesc.trim(),
-        }),
-      });
+      for (const f of allFeatures) {
+        const res = await fetch(`/api/projects/${project.id}/features`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(f),
+        });
 
-      if (res.ok) {
-        const feature = await res.json();
-        addFeature(feature);
-        toast.success("Feature added.");
+        if (res.ok) {
+          const feature = await res.json();
+          addFeature(feature);
+          addedCount++;
+        }
+      }
+
+      if (addedCount > 0) {
+        toast.success(`Added ${addedCount} feature${addedCount !== 1 ? "s" : ""}.`);
       } else {
-        toast.error("Failed to add feature.");
+        toast.error("Failed to add features.");
       }
     } catch {
       toast.error("Something went wrong.");
     } finally {
       setIsAdding(false);
+      setAddTitle("");
+      setAddDesc("");
+      setPendingFeatures([]);
+      setAddDialogOpen(false);
     }
   }
 
-  async function handleAddAndClose() {
-    await handleAdd();
+  function handleCloseAddDialog() {
     setAddTitle("");
     setAddDesc("");
+    setPendingFeatures([]);
+    setEditingPendingIndex(null);
     setAddDialogOpen(false);
-  }
-
-  async function handleAddAnother() {
-    await handleAdd();
-    setAddTitle("");
-    setAddDesc("");
   }
 
   // ─── Edit feature ──────────────────────────────────────────────────
 
   function startEdit(feature: ProjectFeature) {
-    setEditingId(feature.id);
+    setEditTarget(feature);
     setEditTitle(feature.title);
     setEditDesc(feature.description);
   }
 
   async function saveEdit() {
-    if (!project || !editingId) return;
+    if (!project || !editTarget) return;
     const trimmedTitle = editTitle.trim();
     const trimmedDesc = editDesc.trim();
     if (!trimmedTitle || !trimmedDesc) return;
 
+    setIsSaving(true);
     try {
       const res = await fetch(
-        `/api/projects/${project.id}/features/${editingId}`,
+        `/api/projects/${project.id}/features/${editTarget.id}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -232,18 +288,19 @@ export function FeaturesContent() {
       );
 
       if (res.ok) {
-        updateFeature(editingId, {
+        updateFeature(editTarget.id, {
           title: trimmedTitle,
           description: trimmedDesc,
         });
         toast.success("Feature updated.");
+        setEditTarget(null);
       } else {
         toast.error("Failed to update feature.");
       }
     } catch {
       toast.error("Something went wrong.");
     } finally {
-      setEditingId(null);
+      setIsSaving(false);
     }
   }
 
@@ -273,42 +330,26 @@ export function FeaturesContent() {
     }
   }
 
-  // ─── Drag and drop ─────────────────────────────────────────────────
-
-  async function handleDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    if (!over || active.id === over.id || !project) return;
-
-    const oldIndex = features.findIndex((f) => f.id === active.id);
-    const newIndex = features.findIndex((f) => f.id === over.id);
-
-    const reordered = arrayMove(features, oldIndex, newIndex);
-    setFeatures(reordered);
-
-    try {
-      await fetch(`/api/projects/${project.id}/features/reorder`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          featureIds: reordered.map((f) => f.id),
-        }),
-      });
-    } catch {
-      // Revert on failure
-      setFeatures(features);
-      toast.error("Failed to reorder features.");
-    }
-  }
-
   // ─── Render ─────────────────────────────────────────────────────────
 
   if (loading || !project) {
     return (
       <div className="p-6 sm:p-8">
         <Skeleton className="mb-6 h-8 w-48" />
-        <div className="space-y-3">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-20 w-full rounded-xl" />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div
+              key={i}
+              className="overflow-hidden rounded-xl border border-border/60 shadow-sm"
+            >
+              <div className="bg-primary/10 px-5 py-4">
+                <Skeleton className="h-5 w-3/4" />
+              </div>
+              <div className="space-y-2 px-5 py-4">
+                <Skeleton className="h-3 w-full" />
+                <Skeleton className="h-3 w-5/6" />
+              </div>
+            </div>
           ))}
         </div>
       </div>
@@ -320,7 +361,14 @@ export function FeaturesContent() {
       <div className="p-6 sm:p-8">
         {/* Header */}
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight">Features</h1>
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Features</h1>
+            {features.length > 0 && (
+              <p className="mt-1 text-sm text-muted-foreground">
+                {features.length} feature{features.length !== 1 ? "s" : ""} defined for this project
+              </p>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             {features.length > 0 && (
               <Button
@@ -366,16 +414,19 @@ export function FeaturesContent() {
 
         {/* Generating skeleton */}
         {generating && (
-          <div className="space-y-3">
-            {Array.from({ length: 6 }).map((_, i) => (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {Array.from({ length: 8 }).map((_, i) => (
               <div
                 key={i}
-                className="flex items-start gap-3 rounded-xl border border-border/60 p-4"
+                className="overflow-hidden rounded-xl border border-border/60 shadow-sm"
               >
-                <Skeleton className="mt-0.5 size-5 shrink-0 rounded" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-5 w-48" />
-                  <Skeleton className="h-4 w-full" />
+                <div className="bg-primary/10 px-5 py-4">
+                  <Skeleton className="h-5 w-3/4" />
+                </div>
+                <div className="space-y-2 px-5 py-4">
+                  <Skeleton className="h-3 w-full" />
+                  <Skeleton className="h-3 w-5/6" />
+                  <Skeleton className="h-3 w-4/6" />
                 </div>
               </div>
             ))}
@@ -414,60 +465,178 @@ export function FeaturesContent() {
           </div>
         )}
 
-        {/* Feature list */}
+        {/* Feature card grid */}
         {!generating && features.length > 0 && (
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleDragEnd}
+          <motion.div
+            variants={container}
+            initial="hidden"
+            animate="visible"
+            className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
           >
-            <SortableContext
-              items={features.map((f) => f.id)}
-              strategy={verticalListSortingStrategy}
-            >
-              <div className="space-y-2">
-                <AnimatePresence mode="popLayout">
-                  {features.map((feature) => (
-                    <SortableFeatureCard
-                      key={feature.id}
-                      feature={feature}
-                      isEditing={editingId === feature.id}
-                      editTitle={editTitle}
-                      editDesc={editDesc}
-                      onEditTitleChange={setEditTitle}
-                      onEditDescChange={setEditDesc}
-                      onStartEdit={() => startEdit(feature)}
-                      onSaveEdit={saveEdit}
-                      onCancelEdit={() => setEditingId(null)}
-                      onDelete={() => setDeleteTarget(feature)}
-                    />
-                  ))}
-                </AnimatePresence>
-              </div>
-            </SortableContext>
-          </DndContext>
+            <AnimatePresence mode="popLayout">
+              {features.map((feature) => (
+                <FeatureCard
+                  key={feature.id}
+                  feature={feature}
+                  onEdit={() => startEdit(feature)}
+                  onDelete={() => setDeleteTarget(feature)}
+                />
+              ))}
+            </AnimatePresence>
+          </motion.div>
         )}
       </div>
 
       {/* Add Feature Dialog */}
-      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+      <Dialog open={addDialogOpen} onOpenChange={(open) => { if (!open) handleCloseAddDialog(); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Add Features</DialogTitle>
+            <DialogDescription className="sr-only">
+              Add one or more features to your project.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Pending features list */}
+            {pendingFeatures.length > 0 && (
+              <div className="space-y-2">
+                {pendingFeatures.map((pf, i) =>
+                  editingPendingIndex === i ? (
+                    <div
+                      key={i}
+                      className="space-y-2 rounded-lg border border-primary/30 bg-muted/30 p-3"
+                    >
+                      <Input
+                        value={editingPendingTitle}
+                        onChange={(e) => setEditingPendingTitle(e.target.value)}
+                        placeholder="Feature title..."
+                        autoFocus
+                      />
+                      <Textarea
+                        value={editingPendingDesc}
+                        onChange={(e) => setEditingPendingDesc(e.target.value)}
+                        placeholder="Description..."
+                        rows={2}
+                      />
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleCancelPendingEdit}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={handleSavePendingEdit}
+                          disabled={!editingPendingTitle.trim()}
+                        >
+                          Save
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      key={i}
+                      className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{pf.title}</p>
+                        {pf.description && (
+                          <p className="truncate text-xs text-muted-foreground">{pf.description}</p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleEditPending(i)}
+                        className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        <Pencil className="size-3" />
+                      </button>
+                      <button
+                        onClick={() => handleRemovePending(i)}
+                        className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </div>
+                  ),
+                )}
+              </div>
+            )}
+
+            <Input
+              placeholder="New feature title..."
+              value={addTitle}
+              onChange={(e) => setAddTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  const next = e.currentTarget
+                    .closest("form, [role=dialog]")
+                    ?.querySelector("textarea");
+                  next?.focus();
+                }
+              }}
+              autoFocus
+            />
+            <Textarea
+              placeholder="Description of your new feature..."
+              value={addDesc}
+              onChange={(e) => setAddDesc(e.target.value)}
+              rows={4}
+            />
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={handleAddAnother}
+              disabled={!addTitle.trim()}
+            >
+              Add Another Feature
+              <Plus className="size-4" />
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={handleSaveFeatures}
+              disabled={(pendingFeatures.length === 0 && !addTitle.trim()) || isAdding}
+            >
+              {isAdding ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                `Save Feature${pendingFeatures.length + (addTitle.trim() ? 1 : 0) !== 1 ? "s" : ""}`
+              )}
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={handleCloseAddDialog}
+            >
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Feature Dialog */}
+      <Dialog
+        open={!!editTarget}
+        onOpenChange={(open) => !open && setEditTarget(null)}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Add Feature</DialogTitle>
+            <DialogTitle>Edit Feature</DialogTitle>
             <DialogDescription>
-              Describe a key feature for your project.
+              Update this feature&apos;s title and description.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>
               <Input
                 placeholder="Feature title"
-                value={addTitle}
-                onChange={(e) => setAddTitle(e.target.value)}
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
-                    // Focus description
                     const next = e.currentTarget
                       .closest("form, [role=dialog]")
                       ?.querySelector("textarea");
@@ -480,31 +649,31 @@ export function FeaturesContent() {
             <div>
               <Textarea
                 placeholder="What does this feature do and why does it matter?"
-                value={addDesc}
-                onChange={(e) => setAddDesc(e.target.value)}
-                rows={3}
+                value={editDesc}
+                onChange={(e) => setEditDesc(e.target.value)}
+                rows={4}
               />
             </div>
           </div>
-          <DialogFooter className="gap-2 sm:gap-0">
+          <DialogFooter>
             <Button
               variant="outline"
               size="sm"
-              onClick={handleAddAnother}
-              disabled={!addTitle.trim() || !addDesc.trim() || isAdding}
+              onClick={() => setEditTarget(null)}
+              disabled={isSaving}
             >
-              {isAdding ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                "Add Another"
-              )}
+              Cancel
             </Button>
             <Button
               size="sm"
-              onClick={handleAddAndClose}
-              disabled={!addTitle.trim() || !addDesc.trim() || isAdding}
+              onClick={saveEdit}
+              disabled={!editTitle.trim() || !editDesc.trim() || isSaving}
             >
-              Done
+              {isSaving ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                "Save Changes"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -578,137 +747,81 @@ export function FeaturesContent() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
-/*  Sortable Feature Card                                                    */
+/*  Feature Card                                                             */
 /* ═══════════════════════════════════════════════════════════════════════════ */
 
-interface SortableFeatureCardProps {
+interface FeatureCardProps {
   feature: ProjectFeature;
-  isEditing: boolean;
-  editTitle: string;
-  editDesc: string;
-  onEditTitleChange: (v: string) => void;
-  onEditDescChange: (v: string) => void;
-  onStartEdit: () => void;
-  onSaveEdit: () => void;
-  onCancelEdit: () => void;
+  onEdit: () => void;
   onDelete: () => void;
 }
 
-function SortableFeatureCard({
-  feature,
-  isEditing,
-  editTitle,
-  editDesc,
-  onEditTitleChange,
-  onEditDescChange,
-  onStartEdit,
-  onSaveEdit,
-  onCancelEdit,
-  onDelete,
-}: SortableFeatureCardProps) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: feature.id });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  };
+function FeatureCard({ feature, onEdit, onDelete }: FeatureCardProps) {
+  const bullets = descriptionToBullets(feature.description);
 
   return (
     <motion.div
-      ref={setNodeRef}
-      style={style}
-      variants={listItem}
+      variants={cardItem}
       initial="hidden"
       animate="visible"
       exit="exit"
       layout
     >
-      <Card
+      <div
         className={cn(
-          "group flex items-start gap-3 p-4 transition-shadow",
-          isDragging && "z-50 shadow-lg",
+          "group relative flex h-full flex-col overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm transition-all",
+          "hover:border-border hover:shadow-md",
         )}
       >
-        {/* Drag handle */}
-        <button
-          {...attributes}
-          {...listeners}
-          className="mt-0.5 flex size-5 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground/40 hover:text-muted-foreground active:cursor-grabbing"
-        >
-          <GripVertical className="size-4" />
-        </button>
+        {/* Colored header with title */}
+        <div className="relative bg-primary/10 px-5 py-4">
+          <h3 className="pr-14 text-sm font-bold leading-snug">
+            {feature.title}
+          </h3>
 
-        {isEditing ? (
-          <div className="flex-1 space-y-2">
-            <Input
-              value={editTitle}
-              onChange={(e) => onEditTitleChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  onSaveEdit();
-                }
-                if (e.key === "Escape") onCancelEdit();
-              }}
-              className="h-8 text-sm font-medium"
-              autoFocus
-            />
-            <Textarea
-              value={editDesc}
-              onChange={(e) => onEditDescChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") onCancelEdit();
-              }}
-              className="text-sm"
-              rows={2}
-            />
-            <div className="flex gap-1">
-              <Button size="sm" variant="outline" onClick={onSaveEdit}>
-                <Check className="size-3.5" />
-                Save
-              </Button>
-              <Button size="sm" variant="ghost" onClick={onCancelEdit}>
-                <X className="size-3.5" />
-                Cancel
-              </Button>
-            </div>
+          {/* Actions */}
+          <div className="absolute right-2.5 top-2.5 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+            <button
+              onClick={onEdit}
+              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-background/60 hover:text-foreground"
+            >
+              <Pencil className="size-3.5" />
+            </button>
+            <button
+              onClick={onDelete}
+              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+            >
+              <Trash2 className="size-3.5" />
+            </button>
           </div>
-        ) : (
-          <>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium leading-snug">
-                {feature.title}
-              </p>
-              <p className="mt-0.5 text-sm leading-relaxed text-muted-foreground">
-                {feature.description}
-              </p>
-            </div>
+        </div>
 
-            {/* Actions */}
-            <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-              <button
-                onClick={onStartEdit}
-                className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                <Pencil className="size-3.5" />
-              </button>
-              <button
-                onClick={onDelete}
-                className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-              >
-                <Trash2 className="size-3.5" />
-              </button>
-            </div>
-          </>
-        )}
-      </Card>
+        {/* Body with description and bullets */}
+        <div className="flex flex-1 flex-col px-5 py-4">
+          {bullets.length > 1 ? (
+            <>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {bullets[0]}
+              </p>
+              <ul className="mt-3 space-y-2">
+                {bullets.slice(1).map((bullet, i) => (
+                  <li
+                    key={i}
+                    className="flex items-start gap-2.5 text-xs leading-relaxed text-muted-foreground"
+                  >
+                    <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary/50" />
+                    <span>{bullet}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {feature.description}
+            </p>
+          )}
+        </div>
+      </div>
     </motion.div>
   );
 }

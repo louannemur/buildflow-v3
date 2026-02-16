@@ -1,19 +1,19 @@
 "use client";
 
 import { useEffect, useCallback, useState, useRef } from "react";
+import { AnimatePresence } from "framer-motion";
 import { useEditorStore } from "@/lib/editor/store";
 import { Canvas } from "./canvas";
 import { LayersPanel } from "./LayersPanel";
 import { PropertiesPanel } from "./PropertiesPanel";
 import { CodePanel } from "./CodePanel";
 import { Toolbar } from "./Toolbar";
-import { PromptBar } from "./PromptBar";
-import { PromptChat } from "./PromptChat";
 import { StylePickerModal } from "./StylePickerModal";
 import type { GenerateConfig } from "./StylePickerModal";
-import { SelectionOverlay } from "./SelectionOverlay";
 import { StreamingIndicator } from "./StreamingOverlay";
 import { ComponentLibrary } from "./ComponentLibrary";
+import { VersionHistory } from "./VersionHistory";
+import { EditorChatPanel } from "./EditorChatPanel";
 import { useAIGenerate } from "@/hooks/useAIGenerate";
 import { useChatHistoryStore } from "@/stores/chat-history-store";
 import { UpgradeModal } from "@/components/features/upgrade-modal";
@@ -65,13 +65,11 @@ export function DesignEditor({
   const updateSource = useEditorStore((s) => s.updateSource);
   const selectedBfId = useEditorStore((s) => s.selectedBfId);
   const setSelectedBfId = useEditorStore((s) => s.setSelectedBfId);
-  const selectedElement = useEditorStore((s) => s.selectedElement);
-  const hoveredElement = useEditorStore((s) => s.hoveredElement);
   const showLayers = useEditorStore((s) => s.showLayers);
   const showProperties = useEditorStore((s) => s.showProperties);
   const showComponents = useEditorStore((s) => s.showComponents);
   const showChat = useEditorStore((s) => s.showChat);
-  const iframeScrollTop = useEditorStore((s) => s.iframeScrollTop);
+  const showHistory = useEditorStore((s) => s.showHistory);
   const deleteElement = useEditorStore((s) => s.deleteElement);
   const undo = useEditorStore((s) => s.undo);
   const redo = useEditorStore((s) => s.redo);
@@ -280,7 +278,7 @@ export function DesignEditor({
         });
         addMessage(designId, {
           role: "assistant",
-          content: "Design generated",
+          content: "Design generated! You can now refine it with further edits.",
           editType: "full-page",
         });
 
@@ -309,13 +307,8 @@ export function DesignEditor({
         updateSource(result);
         setStreamingToIframe(false);
         addMessage(designId, {
-          role: "user",
-          content: prompt,
-          editType: "full-page",
-        });
-        addMessage(designId, {
           role: "assistant",
-          content: "Design updated",
+          content: `Done! I've updated the design based on your request: "${prompt}"`,
           editType: "full-page",
         });
 
@@ -326,6 +319,10 @@ export function DesignEditor({
         });
       } else {
         setStreamingToIframe(false);
+        addMessage(designId, {
+          role: "assistant",
+          content: "Something went wrong. Please try again.",
+        });
       }
     },
     [source, designId, editDesignStream, updateSource, addMessage, getHistory, setStreamingToIframe],
@@ -345,29 +342,31 @@ export function DesignEditor({
       );
 
       if (result) {
-        updateSource(result);
+        // Use updateElement to merge the modified element into the full page source
+        // (the AI returns only the modified element, not the full document)
+        useEditorStore.getState().updateElement(bfId, result);
         setStreamingToIframe(false);
         addMessage(designId, {
-          role: "user",
-          content: prompt,
-          editType: "element",
-        });
-        addMessage(designId, {
           role: "assistant",
-          content: `Element <${element?.tag ?? "unknown"}> updated`,
+          content: `Updated the <${element?.tag ?? "element"}> — applied: "${prompt}"`,
           editType: "element",
         });
 
+        const newSource = useEditorStore.getState().source;
         await fetch(`/api/designs/${designId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ html: result }),
+          body: JSON.stringify({ html: newSource }),
         });
       } else {
         setStreamingToIframe(false);
+        addMessage(designId, {
+          role: "assistant",
+          content: "Something went wrong. Please try again.",
+        });
       }
     },
-    [source, designId, modifyElementStream, updateSource, addMessage, setStreamingToIframe],
+    [source, designId, modifyElementStream, addMessage, setStreamingToIframe],
   );
 
   const handleAddSection = useCallback(
@@ -375,29 +374,31 @@ export function DesignEditor({
       const result = await addSectionAfterStream(afterBfId, prompt, source);
 
       if (result) {
-        updateSource(result);
+        // Use insertAfter to merge the new section into the full page source
+        // (the AI returns only the new section, not the full document)
+        useEditorStore.getState().insertAfter(afterBfId, result);
         setStreamingToIframe(false);
         addMessage(designId, {
-          role: "user",
-          content: prompt,
-          editType: "add-section",
-        });
-        addMessage(designId, {
           role: "assistant",
-          content: "Section added",
+          content: `New section added to the design: "${prompt}"`,
           editType: "add-section",
         });
 
+        const newSource = useEditorStore.getState().source;
         await fetch(`/api/designs/${designId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ html: result }),
+          body: JSON.stringify({ html: newSource }),
         });
       } else {
         setStreamingToIframe(false);
+        addMessage(designId, {
+          role: "assistant",
+          content: "Something went wrong adding the section. Please try again.",
+        });
       }
     },
-    [source, designId, addSectionAfterStream, updateSource, addMessage, setStreamingToIframe],
+    [source, designId, addSectionAfterStream, addMessage, setStreamingToIframe],
   );
 
   const handleRemoveElement = useCallback(
@@ -458,6 +459,15 @@ export function DesignEditor({
     [designId, updateSource],
   );
 
+  // ─── Version restore handler ─────────────────────────────────────
+
+  const handleVersionRestore = useCallback(
+    (html: string) => {
+      updateSource(html);
+    },
+    [updateSource],
+  );
+
   // ─── Keyboard shortcuts ───────────────────────────────────────────
 
   const handleKeyDown = useCallback(
@@ -513,6 +523,20 @@ export function DesignEditor({
 
       {/* Main editor area */}
       <div className="relative flex min-h-0 flex-1">
+        {/* Left: AI Chat overlay */}
+        <AnimatePresence>
+          {showChat && mode !== "preview" && (
+            <EditorChatPanel
+              designId={designId}
+              onEditDesign={handleEditDesign}
+              onElementEdit={handleElementEdit}
+              onAddSection={handleAddSection}
+              isGenerating={isGenerating}
+              projectContext={projectContext}
+            />
+          )}
+        </AnimatePresence>
+
         {/* Left: Layers panel (design mode, toggled) */}
         {mode === "design" && showLayers && (
           <div className="w-56 shrink-0 border-r border-border/60 bg-background">
@@ -525,17 +549,7 @@ export function DesignEditor({
           {mode === "code" ? (
             <CodePanel />
           ) : (
-            <>
-              <Canvas iframeRef={iframeRef} />
-              {mode === "design" && (
-                <SelectionOverlay
-                  iframeRef={iframeRef}
-                  selectedElement={selectedElement}
-                  hoveredElement={hoveredElement}
-                  iframeScrollTop={iframeScrollTop}
-                />
-              )}
-            </>
+            <Canvas iframeRef={iframeRef} />
           )}
 
           {/* Streaming indicator (floating pill) */}
@@ -564,27 +578,14 @@ export function DesignEditor({
             onClose={() => useEditorStore.getState().toggleComponents()}
           />
         )}
+
+        {/* Right: Version history (toggled) */}
+        {showHistory && (
+          <div className="w-64 shrink-0 border-l border-border/60 bg-background">
+            <VersionHistory onRestore={handleVersionRestore} />
+          </div>
+        )}
       </div>
-
-      {/* Bottom: Chat history (toggled) */}
-      {showChat && (
-        <div className="shrink-0">
-          <PromptChat designId={designId} />
-        </div>
-      )}
-
-      {/* Bottom: Prompt bar */}
-      {mode !== "preview" && (
-        <div className="shrink-0">
-          <PromptBar
-            onEditDesign={handleEditDesign}
-            onElementEdit={handleElementEdit}
-            onAddSection={handleAddSection}
-            isGenerating={isGenerating}
-            projectContext={projectContext}
-          />
-        </div>
-      )}
 
       {/* Style picker modal */}
       <StylePickerModal

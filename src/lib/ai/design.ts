@@ -1,4 +1,8 @@
+import Anthropic from "@anthropic-ai/sdk";
 import { ai, GEMINI_MODEL } from "./gemini";
+import { anthropic } from "./index";
+
+const CLAUDE_MODEL = "claude-sonnet-4-20250514";
 import { DESIGN_ARCHETYPES } from "@/lib/design/design-archetypes";
 import {
   extractStyleTokens,
@@ -373,22 +377,20 @@ export async function editDesign(params: EditDesignParams): Promise<string> {
 
   const systemPrompt = `${DESIGN_SYSTEM_PROMPT}\n\n${EDIT_DESIGN_PROMPT}${styleTokenContext}`;
 
-  const contents: Array<{ role: "user" | "model"; parts: [{ text: string }] }> = [];
+  const messages: Anthropic.MessageParam[] = [];
 
   if (conversationHistory && conversationHistory.length > 0) {
     for (const msg of conversationHistory) {
-      contents.push({
-        role: msg.role === "assistant" ? "model" : "user",
-        parts: [{ text: msg.content }],
+      messages.push({
+        role: msg.role === "assistant" ? "assistant" : "user",
+        content: msg.content,
       });
     }
   }
 
-  contents.push({
+  messages.push({
     role: "user",
-    parts: [
-      {
-        text: `Project: "${projectName}" — ${projectDescription}
+    content: `Project: "${projectName}" — ${projectDescription}
 Page: "${pageName}" (${pageType})
 ${pageGuidance}
 
@@ -400,21 +402,20 @@ ${previousHtml}
 Edit request: ${editRequest}
 
 Return the COMPLETE updated HTML document with ALL the changes applied. Do not omit any sections.`,
-      },
-    ],
   });
 
-  const response = await ai.models.generateContent({
-    model: GEMINI_MODEL,
-    contents,
-    config: {
-      systemInstruction: systemPrompt,
-      temperature: 0.3,
-      maxOutputTokens: 16384,
-    },
+  const response = await anthropic.messages.create({
+    model: CLAUDE_MODEL,
+    max_tokens: 16384,
+    system: systemPrompt,
+    messages,
+    temperature: 0.3,
   });
 
-  const text = response.text ?? "";
+  const text = response.content
+    .filter((block): block is Anthropic.TextBlock => block.type === "text")
+    .map((block) => block.text)
+    .join("");
   return extractHtmlFromResponse(text);
 }
 
@@ -452,17 +453,18 @@ User request: ${userRequest}
 
 Return ONLY the modified element HTML with its exact data-bf-id="${elementId}" preserved. Nothing else.`;
 
-  const response = await ai.models.generateContent({
-    model: GEMINI_MODEL,
-    contents: [{ role: "user", parts: [{ text: userMessage }] }],
-    config: {
-      systemInstruction: ELEMENT_MODIFY_PROMPT,
-      temperature: 0.3,
-      maxOutputTokens: 8192,
-    },
+  const response = await anthropic.messages.create({
+    model: CLAUDE_MODEL,
+    max_tokens: 8192,
+    system: ELEMENT_MODIFY_PROMPT,
+    messages: [{ role: "user", content: userMessage }],
+    temperature: 0.3,
   });
 
-  const text = response.text ?? "";
+  const text = response.content
+    .filter((block): block is Anthropic.TextBlock => block.type === "text")
+    .map((block) => block.text)
+    .join("");
   return extractHtmlFromResponse(text);
 }
 
@@ -499,18 +501,86 @@ User request: ${userRequest}
 
 Return ONLY the new section HTML to be inserted. Add data-bf-id to every element. Match the existing design language exactly.`;
 
-  const response = await ai.models.generateContent({
-    model: GEMINI_MODEL,
-    contents: [{ role: "user", parts: [{ text: userMessage }] }],
-    config: {
-      systemInstruction: ADD_SECTION_PROMPT,
-      temperature: 0.5,
-      maxOutputTokens: 8192,
-    },
+  const response = await anthropic.messages.create({
+    model: CLAUDE_MODEL,
+    max_tokens: 8192,
+    system: ADD_SECTION_PROMPT,
+    messages: [{ role: "user", content: userMessage }],
+    temperature: 0.5,
   });
 
-  const text = response.text ?? "";
+  const text = response.content
+    .filter((block): block is Anthropic.TextBlock => block.type === "text")
+    .map((block) => block.text)
+    .join("");
   return extractHtmlFromResponse(text);
+}
+
+// ── Review & Fix Design (Anthropic / Claude) ─────────────────────
+
+const REVIEW_SYSTEM_PROMPT = `You are a senior UI/UX quality reviewer. You receive a complete HTML page and must check it for readability and visual issues, then return a FIXED version.
+
+CHECK FOR THESE ISSUES:
+
+1. **Navbar / Header contrast**: Navigation text or links that blend into the background — especially on scroll when content passes behind a transparent or semi-transparent nav. Fix by ensuring the nav has a solid or sufficiently opaque background (e.g. bg-white/95 backdrop-blur, or bg-[#0a0a0a]/95 backdrop-blur for dark), and that nav text has strong contrast against it.
+
+2. **Text-on-background contrast**: Any text (headings, body, labels, buttons) that is too similar in color to its background. Light gray text on white, dark gray text on dark backgrounds, colored text on similarly-colored backgrounds. Fix by adjusting text colors for clear readability.
+
+3. **Fixed/sticky element issues**: Sticky or fixed headers, sidebars, or footers that don't have solid backgrounds — content scrolling behind them becomes unreadable. Fix by adding opaque or frosted-glass backgrounds.
+
+4. **Overlapping text or elements**: Text that overlaps with other text, images, or decorative elements. Fix by adjusting z-index, padding, or positioning.
+
+5. **Unreadable hero text**: Hero headlines or subtitles placed over images or gradients without sufficient text shadow, overlay, or contrast. Fix by adding a dark overlay behind light text, or a text-shadow, or adjusting colors.
+
+6. **Button readability**: Buttons with text that doesn't contrast against the button background. Ghost/outline buttons with text too light to read. Fix by adjusting button colors.
+
+7. **Invisible or low-contrast borders**: Card borders or dividers that are invisible against their background. Fix only if the design relies on borders for visual separation.
+
+8. **Scroll behavior**: If the page has a transparent navbar with position:fixed or sticky, ensure it gets a background on scroll OR has a permanent semi-opaque background so content doesn't bleed through.
+
+RULES:
+- Return the COMPLETE fixed HTML document — not just the changed parts
+- Only change what's needed to fix readability issues. Do NOT redesign, restyle, or alter the creative direction
+- Preserve ALL data-bf-id attributes exactly as they are
+- Preserve ALL animations, scripts, fonts, and the overall design concept
+- Preserve ALL content text — do not rewrite copy
+- If there are NO readability issues, return the HTML unchanged
+- Do NOT add comments about what you changed — just return the fixed HTML
+- Output ONLY the HTML document, no markdown code blocks, no explanation`;
+
+/**
+ * Review a generated design for readability issues and return a fixed version.
+ * Uses Anthropic Claude for analysis since it excels at visual/structural reasoning.
+ */
+export async function reviewAndFixDesign(html: string): Promise<string> {
+  try {
+    const response = await anthropic.messages.create({
+      model: CLAUDE_MODEL,
+      max_tokens: 16384,
+      system: REVIEW_SYSTEM_PROMPT,
+      messages: [
+        {
+          role: "user",
+          content: `Review this HTML page for readability issues (especially navbar contrast, text visibility, and scroll behavior) and return the fixed version:\n\n${html}`,
+        },
+      ],
+    });
+
+    const text = response.content
+      .filter((block): block is Anthropic.TextBlock => block.type === "text")
+      .map((block) => block.text)
+      .join("");
+
+    if (!text.trim()) return html;
+
+    const fixed = extractHtmlFromResponse(text);
+    // Sanity check — if the response is way too short, it likely failed
+    if (fixed.length < html.length * 0.5) return html;
+    return fixed;
+  } catch (error) {
+    console.error("Design review failed, using original:", error);
+    return html;
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -535,19 +605,18 @@ export async function* editDesignStream(
 
   const systemPrompt = `${DESIGN_SYSTEM_PROMPT}\n\n${EDIT_DESIGN_PROMPT}${styleTokenContext}`;
 
-  const contents: Array<{ role: "user" | "model"; parts: [{ text: string }] }> = [];
+  const messages: Anthropic.MessageParam[] = [];
   if (conversationHistory && conversationHistory.length > 0) {
     for (const msg of conversationHistory) {
-      contents.push({
-        role: msg.role === "assistant" ? "model" : "user",
-        parts: [{ text: msg.content }],
+      messages.push({
+        role: msg.role === "assistant" ? "assistant" : "user",
+        content: msg.content,
       });
     }
   }
-  contents.push({
+  messages.push({
     role: "user",
-    parts: [{
-      text: `Project: "${projectName}" — ${projectDescription}
+    content: `Project: "${projectName}" — ${projectDescription}
 Page: "${pageName}" (${pageType})
 ${pageGuidance}
 
@@ -559,22 +628,20 @@ ${previousHtml}
 Edit request: ${editRequest}
 
 Return the COMPLETE updated HTML document with ALL the changes applied. Do not omit any sections.`,
-    }],
   });
 
-  const response = await ai.models.generateContentStream({
-    model: GEMINI_MODEL,
-    contents,
-    config: {
-      systemInstruction: systemPrompt,
-      temperature: 0.3,
-      maxOutputTokens: 16384,
-    },
+  const stream = anthropic.messages.stream({
+    model: CLAUDE_MODEL,
+    max_tokens: 16384,
+    system: systemPrompt,
+    messages,
+    temperature: 0.3,
   });
 
-  for await (const chunk of response) {
-    const text = chunk.text;
-    if (text) yield { text };
+  for await (const event of stream) {
+    if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+      yield { text: event.delta.text };
+    }
   }
 }
 
@@ -601,19 +668,18 @@ User request: ${userRequest}
 
 Return ONLY the modified element HTML with its exact data-bf-id="${elementId}" preserved. Nothing else.`;
 
-  const response = await ai.models.generateContentStream({
-    model: GEMINI_MODEL,
-    contents: [{ role: "user", parts: [{ text: userMessage }] }],
-    config: {
-      systemInstruction: ELEMENT_MODIFY_PROMPT,
-      temperature: 0.3,
-      maxOutputTokens: 8192,
-    },
+  const stream = anthropic.messages.stream({
+    model: CLAUDE_MODEL,
+    max_tokens: 8192,
+    system: ELEMENT_MODIFY_PROMPT,
+    messages: [{ role: "user", content: userMessage }],
+    temperature: 0.3,
   });
 
-  for await (const chunk of response) {
-    const text = chunk.text;
-    if (text) yield { text };
+  for await (const event of stream) {
+    if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+      yield { text: event.delta.text };
+    }
   }
 }
 
@@ -641,18 +707,17 @@ User request: ${userRequest}
 
 Return ONLY the new section HTML to be inserted. Add data-bf-id to every element. Match the existing design language exactly.`;
 
-  const response = await ai.models.generateContentStream({
-    model: GEMINI_MODEL,
-    contents: [{ role: "user", parts: [{ text: userMessage }] }],
-    config: {
-      systemInstruction: ADD_SECTION_PROMPT,
-      temperature: 0.5,
-      maxOutputTokens: 8192,
-    },
+  const stream = anthropic.messages.stream({
+    model: CLAUDE_MODEL,
+    max_tokens: 8192,
+    system: ADD_SECTION_PROMPT,
+    messages: [{ role: "user", content: userMessage }],
+    temperature: 0.5,
   });
 
-  for await (const chunk of response) {
-    const text = chunk.text;
-    if (text) yield { text };
+  for await (const event of stream) {
+    if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+      yield { text: event.delta.text };
+    }
   }
 }

@@ -27,7 +27,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
@@ -91,13 +90,13 @@ const staggerItem = {
 
 const stepTypeConfig: Record<
   string,
-  { label: string; icon: typeof MousePointer; color: string }
+  { label: string; icon: typeof MousePointer; color: string; badge: string }
 > = {
-  action: { label: "Action", icon: MousePointer, color: "text-blue-500 bg-blue-500/10 border-blue-500/20" },
-  decision: { label: "Decision", icon: GitFork, color: "text-amber-500 bg-amber-500/10 border-amber-500/20" },
-  navigation: { label: "Navigation", icon: ArrowRight, color: "text-green-500 bg-green-500/10 border-green-500/20" },
-  input: { label: "Input", icon: FormInput, color: "text-violet-500 bg-violet-500/10 border-violet-500/20" },
-  display: { label: "Display", icon: Monitor, color: "text-cyan-500 bg-cyan-500/10 border-cyan-500/20" },
+  action: { label: "Action", icon: MousePointer, color: "text-blue-500 bg-blue-500/10 border-blue-500/20", badge: "text-amber-600" },
+  decision: { label: "Decision", icon: GitFork, color: "text-amber-500 bg-amber-500/10 border-amber-500/20", badge: "text-red-500" },
+  navigation: { label: "Navigation", icon: ArrowRight, color: "text-green-500 bg-green-500/10 border-green-500/20", badge: "text-green-600" },
+  input: { label: "Input", icon: FormInput, color: "text-violet-500 bg-violet-500/10 border-violet-500/20", badge: "text-violet-500" },
+  display: { label: "Display", icon: Monitor, color: "text-cyan-500 bg-cyan-500/10 border-cyan-500/20", badge: "text-cyan-600" },
 };
 
 function getStepConfig(type: string) {
@@ -325,9 +324,26 @@ export function FlowsContent() {
     return (
       <div className="p-6 sm:p-8">
         <Skeleton className="mb-6 h-8 w-48" />
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-5 sm:grid-cols-2">
           {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-40 w-full rounded-xl" />
+            <div
+              key={i}
+              className="rounded-xl border border-border/60 bg-card shadow-sm"
+            >
+              <div className="flex items-center justify-between px-6 pt-5 pb-1">
+                <Skeleton className="h-5 w-48" />
+                <Skeleton className="h-5 w-16 rounded-full" />
+              </div>
+              <div className="space-y-3 px-6 pt-3 pb-5">
+                {Array.from({ length: 4 }).map((_, j) => (
+                  <div key={j} className="flex items-center gap-3">
+                    <Skeleton className="size-6 shrink-0 rounded-full" />
+                    <Skeleton className="h-4 flex-1" />
+                    <Skeleton className="h-4 w-16 shrink-0" />
+                  </div>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       </div>
@@ -408,16 +424,23 @@ export function FlowsContent() {
 
         {/* Generating skeleton */}
         {generating && (
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-5 sm:grid-cols-2">
             {Array.from({ length: 4 }).map((_, i) => (
               <div
                 key={i}
-                className="rounded-xl border border-border/60 p-4 space-y-3"
+                className="rounded-xl border border-border/60 bg-card shadow-sm"
               >
-                <Skeleton className="h-5 w-40" />
-                <div className="space-y-2">
-                  {Array.from({ length: 4 }).map((_, j) => (
-                    <Skeleton key={j} className="h-4 w-full" />
+                <div className="flex items-center justify-between px-6 pt-5 pb-1">
+                  <Skeleton className="h-5 w-48" />
+                  <Skeleton className="h-5 w-16 rounded-full" />
+                </div>
+                <div className="space-y-3 px-6 pt-3 pb-5">
+                  {Array.from({ length: 5 }).map((_, j) => (
+                    <div key={j} className="flex items-center gap-3">
+                      <Skeleton className="size-6 shrink-0 rounded-full" />
+                      <Skeleton className="h-4 flex-1" />
+                      <Skeleton className="h-4 w-16 shrink-0" />
+                    </div>
                   ))}
                 </div>
               </div>
@@ -455,29 +478,35 @@ export function FlowsContent() {
         )}
 
         {/* List view */}
-        {!generating && userFlows.length > 0 && view === "list" && (
-          <motion.div
-            initial="hidden"
-            animate="visible"
-            variants={staggerContainer}
-            className="grid gap-4 sm:grid-cols-2"
-          >
-            {userFlows.map((flow) => (
-              <motion.div key={flow.id} variants={staggerItem}>
-                <FlowCard
-                  flow={flow}
-                  isSelected={selectedFlowId === flow.id}
-                  onSelect={() => {
-                    setSelectedFlowId(flow.id);
-                    setView("diagram");
-                  }}
-                  onEdit={() => openEditModal(flow)}
-                  onDelete={() => setDeleteTarget(flow)}
-                />
-              </motion.div>
-            ))}
-          </motion.div>
-        )}
+        {!generating && userFlows.length > 0 && view === "list" && (() => {
+          const MAX_VISIBLE = 6;
+          const maxSteps = Math.min(Math.max(...userFlows.map((f) => f.steps.length)), MAX_VISIBLE);
+
+          return (
+            <motion.div
+              initial="hidden"
+              animate="visible"
+              variants={staggerContainer}
+              className="grid gap-5 sm:grid-cols-2"
+            >
+              {userFlows.map((flow) => (
+                <motion.div key={flow.id} variants={staggerItem} className="h-full">
+                  <FlowCard
+                    flow={flow}
+                    uniformStepCount={maxSteps}
+                    isSelected={selectedFlowId === flow.id}
+                    onSelect={() => {
+                      setSelectedFlowId(flow.id);
+                      setView("diagram");
+                    }}
+                    onEdit={() => openEditModal(flow)}
+                    onDelete={() => setDeleteTarget(flow)}
+                  />
+                </motion.div>
+              ))}
+            </motion.div>
+          );
+        })()}
 
         {/* Diagram view */}
         {!generating && userFlows.length > 0 && view === "diagram" && (
@@ -730,33 +759,40 @@ export function FlowsContent() {
 
 function FlowCard({
   flow,
+  uniformStepCount,
   isSelected,
   onSelect,
   onEdit,
   onDelete,
 }: {
   flow: ProjectUserFlow;
+  uniformStepCount: number;
   isSelected: boolean;
   onSelect: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const MAX_VISIBLE = 6;
+  const visibleSteps = flow.steps.slice(0, MAX_VISIBLE);
+  const remaining = flow.steps.length - MAX_VISIBLE;
+  // Invisible spacer rows to equalize card heights
+  const emptySlots = Math.max(0, uniformStepCount - visibleSteps.length);
+
   return (
-    <Card
+    <div
+      onClick={onSelect}
       className={cn(
-        "group cursor-pointer transition-colors hover:border-primary/50",
+        "group flex h-full cursor-pointer flex-col rounded-xl border border-border/60 bg-card shadow-sm transition-all hover:border-border hover:shadow-md",
         isSelected && "border-primary/40 ring-1 ring-primary/20",
       )}
-      onClick={onSelect}
     >
-      <CardHeader className="flex flex-row items-start justify-between gap-2 pb-2">
-        <div className="min-w-0 flex-1">
-          <CardTitle className="text-sm">{flow.title}</CardTitle>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <Badge variant="secondary" className="text-[10px]">
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 pt-5 pb-1">
+        <h3 className="text-base font-semibold leading-snug">{flow.title}</h3>
+        <div className="flex items-center gap-1.5">
+          <span className="rounded-full border border-border/80 px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground">
             {flow.steps.length} steps
-          </Badge>
+          </span>
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -776,23 +812,25 @@ function FlowCard({
             <Trash2 className="size-3.5" />
           </button>
         </div>
-      </CardHeader>
-      <CardContent className="pb-3">
-        <ol className="space-y-1">
-          {flow.steps.slice(0, 6).map((step, i) => {
+      </div>
+
+      {/* Steps */}
+      <div className="flex flex-1 flex-col px-6 pt-3 pb-5">
+        <ol className="space-y-2.5">
+          {visibleSteps.map((step, i) => {
             const cfg = getStepConfig(step.type);
             return (
-              <li key={step.id} className="flex items-center gap-2 text-xs">
-                <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-bold text-muted-foreground">
+              <li key={step.id} className="flex items-center gap-3">
+                <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted/70 text-[11px] font-semibold text-muted-foreground">
                   {i + 1}
                 </span>
-                <span className="truncate text-muted-foreground">
+                <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
                   {step.title}
                 </span>
                 <span
                   className={cn(
-                    "ml-auto shrink-0 rounded px-1 py-0.5 text-[9px] font-medium",
-                    cfg.color,
+                    "shrink-0 text-xs font-semibold",
+                    cfg.badge,
                   )}
                 >
                   {cfg.label}
@@ -800,14 +838,17 @@ function FlowCard({
               </li>
             );
           })}
-          {flow.steps.length > 6 && (
-            <li className="text-xs text-muted-foreground/60">
-              +{flow.steps.length - 6} more steps
-            </li>
-          )}
+          {Array.from({ length: emptySlots }).map((_, i) => (
+            <li key={`spacer-${i}`} className="h-6" aria-hidden />
+          ))}
         </ol>
-      </CardContent>
-    </Card>
+        {remaining > 0 && (
+          <p className="mt-auto pt-3 text-xs text-muted-foreground/50">
+            +{remaining} more step{remaining !== 1 ? "s" : ""}
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
 

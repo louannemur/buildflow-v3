@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { toast } from "sonner";
 import type {
   FlowStep,
   PageContent,
@@ -120,6 +121,12 @@ interface ProjectState {
   // Build config actions
   setBuildConfig: (config: ProjectBuildConfig | null) => void;
 
+  // Design generation (survives navigation)
+  designGenProgress: number;
+  designGenTotal: number;
+  designGenerating: boolean;
+  generateAllDesigns: () => Promise<void>;
+
   // Loading
   setLoading: (loading: boolean) => void;
 
@@ -135,6 +142,9 @@ const initialState = {
   designs: [],
   buildConfig: null,
   loading: true,
+  designGenProgress: 0,
+  designGenTotal: 0,
+  designGenerating: false,
 };
 
 export const useProjectStore = create<ProjectState>((set) => ({
@@ -208,6 +218,62 @@ export const useProjectStore = create<ProjectState>((set) => ({
 
   // Build config
   setBuildConfig: (buildConfig) => set({ buildConfig }),
+
+  // Design generation
+  designGenProgress: 0,
+  designGenTotal: 0,
+  designGenerating: false,
+
+  generateAllDesigns: async () => {
+    const state = useProjectStore.getState();
+    if (!state.project || state.designGenerating) return;
+
+    const pageDesignIds = new Set(
+      state.designs
+        .filter((d) => d.pageId && d.html.length > 0)
+        .map((d) => d.pageId),
+    );
+    const toGenerate = state.pages.filter((p) => !pageDesignIds.has(p.id));
+
+    if (toGenerate.length === 0) return;
+
+    set({ designGenerating: true, designGenProgress: 0, designGenTotal: toGenerate.length });
+
+    let completed = 0;
+
+    for (const page of toGenerate) {
+      // Re-check in case the store was reset (user left project)
+      const current = useProjectStore.getState();
+      if (!current.designGenerating) break;
+
+      try {
+        const res = await fetch(
+          `/api/projects/${state.project.id}/designs/generate`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pageId: page.id }),
+          },
+        );
+
+        if (res.ok) {
+          const design = await res.json();
+          useProjectStore.getState().addDesign(design);
+        }
+      } catch {
+        // Continue with remaining pages
+      }
+
+      completed++;
+      set({ designGenProgress: completed });
+    }
+
+    set({ designGenerating: false });
+
+    if (completed > 0) {
+      toast.success(`Generated designs for ${completed} page${completed !== 1 ? "s" : ""}.`);
+    }
+  },
 
   // Loading
   setLoading: (loading) => set({ loading }),

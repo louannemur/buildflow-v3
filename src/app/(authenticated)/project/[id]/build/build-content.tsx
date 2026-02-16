@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, Suspense } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
@@ -24,6 +24,12 @@ import {
   Settings2,
   Palette,
   ToggleRight,
+  Rocket,
+  GitBranch,
+  Lock,
+  Unlock,
+  X,
+  Copy,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -33,8 +39,17 @@ import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { UpgradeModal } from "@/components/features/upgrade-modal";
 import { useProjectStore } from "@/stores/project-store";
+import { useBuildStore } from "@/stores/build-store";
 import { cn } from "@/lib/utils";
 import type { BuildFile } from "@/lib/db/schema";
 
@@ -86,19 +101,6 @@ const STYLING_OPTIONS = [
     desc: "CSS preprocessor with variables, nesting, and mixins",
     recommended: false,
   },
-];
-
-/* ─── Status messages during build ───────────────────────────────────────── */
-
-const BUILD_MESSAGES = [
-  "Analyzing project specification...",
-  "Generating component structure...",
-  "Creating page routes...",
-  "Converting designs to components...",
-  "Wiring up navigation...",
-  "Adding styles and theming...",
-  "Writing configuration files...",
-  "Finalizing project...",
 ];
 
 /* ─── File icon helper ───────────────────────────────────────────────────── */
@@ -184,10 +186,26 @@ function buildFileTree(files: BuildFile[]): TreeNode[] {
 
 export function BuildContent() {
   const router = useRouter();
-  const { project, features: projFeatures, userFlows, pages: projPages, designs: projDesigns, buildConfig: existingConfig, setBuildConfig, loading } =
+  const { project, features: projFeatures, userFlows, pages: projPages, designs: projDesigns, buildConfig: existingConfig, loading } =
     useProjectStore();
 
-  // ─── Config state ──────────────────────────────────────────────────
+  // ─── Build store (persists across navigation) ──────────────────────
+  const building = useBuildStore((s) => s.building);
+  const buildResult = useBuildStore((s) => s.buildResult);
+  const streamingFiles = useBuildStore((s) => s.streamingFiles);
+  const currentStreamingPath = useBuildStore((s) => s.currentStreamingPath);
+  const currentStreamingContent = useBuildStore((s) => s.currentStreamingContent);
+  const selectedFile = useBuildStore((s) => s.selectedFile);
+  const expandedDirs = useBuildStore((s) => s.expandedDirs);
+  const verifyStatus = useBuildStore((s) => s.verifyStatus);
+  const setSelectedFile = useBuildStore((s) => s.setSelectedFile);
+  const toggleDir = useBuildStore((s) => s.toggleDir);
+  const cancelBuild = useBuildStore((s) => s.cancelBuild);
+  const startBuild = useBuildStore((s) => s.startBuild);
+  const setBuildResult = useBuildStore((s) => s.setBuildResult);
+  const setExpandedDirs = useBuildStore((s) => s.setExpandedDirs);
+
+  // ─── Config state (local — only used for the config form) ─────────
 
   const [framework, setFramework] = useState<"nextjs" | "vite_react" | "html">(
     existingConfig?.framework ?? "nextjs",
@@ -211,23 +229,50 @@ export function BuildContent() {
   // Hide TypeScript for HTML framework
   const showTypeScript = framework !== "html";
 
-  // ─── Build state ──────────────────────────────────────────────────
-
-  const [building, setBuilding] = useState(false);
-  const [buildMessageIdx, setBuildMessageIdx] = useState(0);
-  const [buildResult, setBuildResult] = useState<{
-    files: BuildFile[];
-    id: string;
-  } | null>(null);
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [fileSearch, setFileSearch] = useState("");
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const streamingEditorRef = useRef<any>(null);
+
+  // ─── Vercel deploy state ──────────────────────────────────────────
+  const [deployDialogOpen, setDeployDialogOpen] = useState(false);
+  const [vercelToken, setVercelToken] = useState("");
+  const [deploying, setDeploying] = useState(false);
+  const [deployResult, setDeployResult] = useState<{ url: string } | null>(null);
+  const [deployError, setDeployError] = useState<string | null>(null);
+
+  // ─── GitHub repo state ──────────────────────────────────────────
+  const [ghDialogOpen, setGhDialogOpen] = useState(false);
+  const [ghToken, setGhToken] = useState("");
+  const [ghRepoName, setGhRepoName] = useState("");
+  const [ghPrivate, setGhPrivate] = useState(false);
+  const [ghCreating, setGhCreating] = useState(false);
+  const [ghResult, setGhResult] = useState<{ url: string } | null>(null);
+  const [ghError, setGhError] = useState<string | null>(null);
+
+  // ─── Publish state ──────────────────────────────────────────────────
+  const [publishing, setPublishing] = useState(false);
+  const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [publishStale, setPublishStale] = useState(false);
+  const [unpublishing, setUnpublishing] = useState(false);
+  const [publishUpgradeOpen, setPublishUpgradeOpen] = useState(false);
+
+  // ─── Handle upgrade signal from store ──────────────────────────────
+
+  useEffect(() => {
+    if (buildResult?.id === "__upgrade__") {
+      setUpgradeOpen(true);
+      setBuildResult(null);
+    }
+  }, [buildResult, setBuildResult]);
 
   // ─── Fetch existing build on mount ────────────────────────────────
 
   useEffect(() => {
     if (!project) return;
+    // Don't fetch if we already have a result or are building
+    if (buildResult || building) return;
 
     async function fetchBuild() {
       try {
@@ -258,19 +303,7 @@ export function BuildContent() {
     }
 
     fetchBuild();
-  }, [project]);
-
-  // ─── Progress messages ────────────────────────────────────────────
-
-  useEffect(() => {
-    if (!building) return;
-    const interval = setInterval(() => {
-      setBuildMessageIdx((i) =>
-        i < BUILD_MESSAGES.length - 1 ? i + 1 : i,
-      );
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [building]);
+  }, [project, buildResult, building, setBuildResult, setExpandedDirs, setSelectedFile]);
 
   // ─── Project summary ─────────────────────────────────────────────
 
@@ -285,84 +318,16 @@ export function BuildContent() {
   const hasPages = projPages.length > 0;
   const hasDesigns = designedPageCount > 0;
 
-  // ─── Build handler ────────────────────────────────────────────────
+  // ─── Build handler ─────────────────────────────────────────────────
 
-  const handleBuild = useCallback(async () => {
+  const handleBuild = useCallback(() => {
     if (!project || building) return;
-
-    setBuilding(true);
-    setBuildMessageIdx(0);
-    setBuildResult(null);
-
-    try {
-      const res = await fetch(`/api/projects/${project.id}/build`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          framework,
-          styling,
-          includeTypeScript: showTypeScript ? includeTypeScript : false,
-        }),
-      });
-
-      if (res.status === 403) {
-        const data = await res.json();
-        if (data.error === "upgrade_required") {
-          setUpgradeOpen(true);
-          return;
-        }
-      }
-
-      if (!res.ok) {
-        const data = await res.json();
-        toast.error(data.error ?? "Build failed. Please try again.");
-        return;
-      }
-
-      const data = await res.json();
-
-      // Update store config
-      setBuildConfig({
-        id: data.id,
-        framework,
-        styling,
-        includeTypeScript: showTypeScript ? includeTypeScript : false,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
-
-      setBuildResult({ files: data.files, id: data.id });
-
-      // Expand top-level dirs
-      const topDirs = new Set<string>();
-      for (const f of data.files as BuildFile[]) {
-        const first = f.path.split("/")[0];
-        if (f.path.includes("/")) topDirs.add(first);
-      }
-      setExpandedDirs(topDirs);
-
-      // Select first file
-      if (data.files.length > 0) {
-        setSelectedFile(data.files[0].path);
-      }
-
-      toast.success(
-        `Project generated! ${data.files.length} files created.`,
-      );
-    } catch {
-      toast.error("Something went wrong. Please try again.");
-    } finally {
-      setBuilding(false);
-    }
-  }, [
-    project,
-    building,
-    framework,
-    styling,
-    includeTypeScript,
-    showTypeScript,
-    setBuildConfig,
-  ]);
+    startBuild(project.id, {
+      framework,
+      styling,
+      includeTypeScript: showTypeScript ? includeTypeScript : false,
+    });
+  }, [project, building, framework, styling, includeTypeScript, showTypeScript, startBuild]);
 
   // ─── Download handler ─────────────────────────────────────────────
 
@@ -371,16 +336,193 @@ export function BuildContent() {
     window.open(`/api/projects/${project.id}/build/download`, "_blank");
   }
 
-  // ─── File tree helpers ────────────────────────────────────────────
+  // ─── Deploy handler ──────────────────────────────────────────────
 
-  function toggleDir(path: string) {
-    setExpandedDirs((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  }
+  const handleDeploy = useCallback(async () => {
+    if (!project || !vercelToken.trim()) return;
+    setDeploying(true);
+    setDeployError(null);
+    setDeployResult(null);
+
+    try {
+      const res = await fetch(`/api/projects/${project.id}/deploy/vercel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: vercelToken.trim() }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setDeployError(data.error ?? "Deployment failed.");
+        return;
+      }
+
+      // Save token for future deploys
+      try {
+        localStorage.setItem("vercel_token", vercelToken.trim());
+      } catch {
+        // localStorage may be unavailable
+      }
+
+      setDeployResult({ url: data.url });
+    } catch {
+      setDeployError("Something went wrong. Please try again.");
+    } finally {
+      setDeploying(false);
+    }
+  }, [project, vercelToken]);
+
+  const openDeployDialog = useCallback(() => {
+    // Pre-fill token from localStorage
+    try {
+      const saved = localStorage.getItem("vercel_token");
+      if (saved) setVercelToken(saved);
+    } catch {
+      // ignore
+    }
+    setDeployError(null);
+    setDeployResult(null);
+    setDeployDialogOpen(true);
+  }, []);
+
+  // ─── GitHub handler ──────────────────────────────────────────────
+
+  const handleGhCreate = useCallback(async () => {
+    if (!project || !ghToken.trim()) return;
+    setGhCreating(true);
+    setGhError(null);
+    setGhResult(null);
+
+    try {
+      const res = await fetch(`/api/projects/${project.id}/deploy/github`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token: ghToken.trim(),
+          repoName: ghRepoName.trim() || undefined,
+          isPrivate: ghPrivate,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setGhError(data.error ?? "Failed to create repository.");
+        return;
+      }
+
+      try {
+        localStorage.setItem("github_token", ghToken.trim());
+      } catch {
+        // ignore
+      }
+
+      setGhResult({ url: data.url });
+    } catch {
+      setGhError("Something went wrong. Please try again.");
+    } finally {
+      setGhCreating(false);
+    }
+  }, [project, ghToken, ghRepoName, ghPrivate]);
+
+  const openGhDialog = useCallback(() => {
+    try {
+      const saved = localStorage.getItem("github_token");
+      if (saved) setGhToken(saved);
+    } catch {
+      // ignore
+    }
+    // Default repo name from project
+    if (project) {
+      setGhRepoName(
+        project.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, ""),
+      );
+    }
+    setGhError(null);
+    setGhResult(null);
+    setGhDialogOpen(true);
+  }, [project]);
+
+  // ─── Fetch publish status on mount ──────────────────────────────────
+  useEffect(() => {
+    if (!project || !buildResult) return;
+
+    async function fetchPublishStatus() {
+      try {
+        const res = await fetch(`/api/projects/${project!.id}/publish`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.published) {
+          setPublishedUrl(data.url);
+          setPublishStale(data.isStale ?? false);
+        }
+      } catch {
+        // Ignore
+      }
+    }
+
+    fetchPublishStatus();
+  }, [project, buildResult]);
+
+  // ─── Publish handler ──────────────────────────────────────────────
+  const handlePublish = useCallback(async () => {
+    if (!project || publishing) return;
+    setPublishing(true);
+    setPublishError(null);
+
+    try {
+      const res = await fetch(`/api/projects/${project.id}/publish`, {
+        method: "POST",
+      });
+      const data = await res.json();
+
+      if (res.status === 403 && data.error === "upgrade_required") {
+        setPublishUpgradeOpen(true);
+        return;
+      }
+
+      if (!res.ok) {
+        setPublishError(data.error ?? "Publishing failed.");
+        return;
+      }
+
+      setPublishedUrl(data.url);
+      setPublishStale(false);
+      toast.success("Published! Your site is live.");
+    } catch {
+      setPublishError("Something went wrong. Please try again.");
+    } finally {
+      setPublishing(false);
+    }
+  }, [project, publishing]);
+
+  // ─── Unpublish handler ────────────────────────────────────────────
+  const handleUnpublish = useCallback(async () => {
+    if (!project || unpublishing) return;
+    setUnpublishing(true);
+
+    try {
+      const res = await fetch(`/api/projects/${project.id}/publish`, {
+        method: "DELETE",
+      });
+
+      if (res.ok) {
+        setPublishedUrl(null);
+        setPublishStale(false);
+        toast.success("Site unpublished.");
+      }
+    } catch {
+      toast.error("Failed to unpublish. Please try again.");
+    } finally {
+      setUnpublishing(false);
+    }
+  }, [project, unpublishing]);
+
+  // ─── Computed values ──────────────────────────────────────────────
 
   const selectedContent = useMemo(() => {
     if (!buildResult || !selectedFile) return "";
@@ -401,6 +543,33 @@ export function BuildContent() {
     );
   }, [fileSearch, buildResult]);
 
+  // ─── Streaming computed values ──────────────────────────────────
+
+  const streamingTree = useMemo(() => {
+    if (!building) return [];
+    const allFiles = [...streamingFiles];
+    if (currentStreamingPath) {
+      allFiles.push({ path: currentStreamingPath, content: "" });
+    }
+    return buildFileTree(allFiles);
+  }, [building, streamingFiles, currentStreamingPath]);
+
+  const streamingEditorContent = useMemo(() => {
+    if (!building || !selectedFile) return "";
+    if (selectedFile === currentStreamingPath) return currentStreamingContent;
+    return streamingFiles.find((f) => f.path === selectedFile)?.content ?? "";
+  }, [building, selectedFile, currentStreamingPath, currentStreamingContent, streamingFiles]);
+
+  // Auto-scroll streaming editor to bottom
+  useEffect(() => {
+    const editor = streamingEditorRef.current;
+    if (!editor || !building || selectedFile !== currentStreamingPath) return;
+    const model = editor.getModel();
+    if (!model) return;
+    const lastLine = model.getLineCount();
+    editor.revealLine(lastLine);
+  }, [streamingEditorContent, building, selectedFile, currentStreamingPath]);
+
   // ─── Loading state ────────────────────────────────────────────────
 
   if (loading || !project) {
@@ -415,27 +584,119 @@ export function BuildContent() {
     );
   }
 
-  // ─── Render: Build in progress ────────────────────────────────────
+  // ─── Render: Build in progress (streaming) ──────────────────────
 
   if (building) {
     return (
-      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-6 p-8">
-        <div className="relative">
-          <div className="flex size-20 items-center justify-center rounded-2xl bg-primary/10">
-            <Hammer className="size-10 text-primary animate-pulse" />
+      <div className="flex h-full flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-border/60 px-4 py-3 sm:px-6">
+          <div className="flex items-center gap-3">
+            <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10">
+              <Hammer className="size-4 text-primary animate-pulse" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold">
+                {verifyStatus ? "Verifying build..." : "Building..."}
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                {verifyStatus ? (
+                  <span>{verifyStatus}</span>
+                ) : (
+                  <>
+                    {streamingFiles.length} file{streamingFiles.length !== 1 ? "s" : ""} generated
+                    {currentStreamingPath && (
+                      <span className="text-primary"> — writing {currentStreamingPath.split("/").pop()}</span>
+                    )}
+                  </>
+                )}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Loader2 className="size-3.5 animate-spin text-primary" />
+            <Button variant="outline" size="sm" onClick={cancelBuild}>
+              <X className="size-3.5" />
+              Cancel
+            </Button>
           </div>
         </div>
-        <div className="text-center">
-          <h2 className="text-xl font-semibold">Building your project...</h2>
-          <p className="mt-2 text-sm text-muted-foreground transition-all duration-500">
-            {BUILD_MESSAGES[buildMessageIdx]}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Loader2 className="size-4 animate-spin text-primary" />
-          <span className="text-xs text-muted-foreground">
-            This may take a minute
-          </span>
+
+        {/* File explorer (streaming) */}
+        <div className="flex min-h-0 flex-1">
+          {/* File tree sidebar */}
+          <div className="w-64 shrink-0 overflow-y-auto border-r border-border/60 bg-muted/30">
+            <div className="px-1 py-2">
+              {streamingTree.length > 0 ? (
+                <FileTreeView
+                  nodes={streamingTree}
+                  selectedFile={selectedFile}
+                  expandedDirs={expandedDirs}
+                  onSelectFile={setSelectedFile}
+                  onToggleDir={toggleDir}
+                  depth={0}
+                  streamingPath={currentStreamingPath}
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center gap-2 py-12 text-muted-foreground">
+                  <Loader2 className="size-5 animate-spin" />
+                  <span className="text-xs">Generating files...</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Code preview (streaming) */}
+          <div className="min-w-0 flex-1">
+            {selectedFile ? (
+              <div className="flex h-full flex-col">
+                <div className="flex items-center gap-2 border-b border-border/60 px-4 py-1.5">
+                  <FileCode2 className="size-3.5 text-muted-foreground" />
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {selectedFile}
+                  </span>
+                  {selectedFile === currentStreamingPath && (
+                    <span className="relative flex size-2">
+                      <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary/60" />
+                      <span className="relative inline-flex size-2 rounded-full bg-primary" />
+                    </span>
+                  )}
+                </div>
+                <div className="min-h-0 flex-1">
+                  <Suspense
+                    fallback={
+                      <div className="flex h-full items-center justify-center">
+                        <Loader2 className="size-5 animate-spin text-muted-foreground" />
+                      </div>
+                    }
+                  >
+                    <MonacoEditor
+                      value={streamingEditorContent}
+                      language={getLanguage(selectedFile)}
+                      theme="vs-dark"
+                      onMount={(editor) => {
+                        streamingEditorRef.current = editor;
+                      }}
+                      options={{
+                        readOnly: true,
+                        minimap: { enabled: false },
+                        fontSize: 13,
+                        lineNumbers: "on",
+                        scrollBeyondLastLine: false,
+                        wordWrap: "on",
+                        padding: { top: 12 },
+                      }}
+                    />
+                  </Suspense>
+                </div>
+              </div>
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
+                <Loader2 className="size-6 animate-spin text-primary/50" />
+                <span className="text-sm">Waiting for files...</span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -566,30 +827,306 @@ export function BuildContent() {
           </div>
         </div>
 
-        {/* Deployment links */}
-        <div className="flex items-center gap-3 border-t border-border/60 px-4 py-3 sm:px-6">
-          <span className="text-xs text-muted-foreground">Deploy:</span>
-          <Button variant="outline" size="sm" asChild>
-            <a
-              href="https://vercel.com/new"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <ExternalLink className="size-3" />
-              Deploy to Vercel
-            </a>
-          </Button>
-          <Button variant="outline" size="sm" asChild>
-            <a
-              href="https://github.com/new"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <ExternalLink className="size-3" />
-              Create GitHub Repo
-            </a>
-          </Button>
+        {/* Publish + Deploy bar */}
+        <div className="flex items-center justify-between border-t border-border/60 px-4 py-3 sm:px-6">
+          {/* Left side: Publish */}
+          <div className="flex items-center gap-3">
+            {publishedUrl ? (
+              <>
+                <div className="flex items-center gap-2 rounded-md bg-emerald-500/10 px-3 py-1.5">
+                  <Globe className="size-3 text-emerald-500" />
+                  <a
+                    href={publishedUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-medium text-emerald-600 hover:underline dark:text-emerald-400"
+                  >
+                    {publishedUrl.replace("https://", "")}
+                  </a>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-5 px-1"
+                    onClick={() => {
+                      navigator.clipboard.writeText(publishedUrl!);
+                      toast.success("URL copied!");
+                    }}
+                  >
+                    <Copy className="size-3" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-5 px-1"
+                    asChild
+                  >
+                    <a
+                      href={publishedUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <ExternalLink className="size-3" />
+                    </a>
+                  </Button>
+                </div>
+                {publishStale && (
+                  <Button
+                    size="sm"
+                    onClick={handlePublish}
+                    disabled={publishing}
+                  >
+                    {publishing && (
+                      <Loader2 className="size-3 animate-spin" />
+                    )}
+                    {publishing ? "Updating..." : "Update"}
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs text-muted-foreground"
+                  onClick={handleUnpublish}
+                  disabled={unpublishing}
+                >
+                  {unpublishing ? "Unpublishing..." : "Unpublish"}
+                </Button>
+              </>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={handlePublish}
+                  disabled={publishing}
+                >
+                  {publishing ? (
+                    <Loader2 className="size-3 animate-spin" />
+                  ) : (
+                    <Globe className="size-3" />
+                  )}
+                  {publishing ? "Publishing..." : "Publish"}
+                </Button>
+                {publishError && (
+                  <p className="text-xs text-destructive">{publishError}</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Right side: Export options */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Export:</span>
+            <Button variant="outline" size="sm" onClick={openDeployDialog}>
+              <Rocket className="size-3" />
+              Vercel
+            </Button>
+            <Button variant="outline" size="sm" onClick={openGhDialog}>
+              <GitBranch className="size-3" />
+              GitHub
+            </Button>
+          </div>
         </div>
+
+        {/* Vercel deploy dialog */}
+        <Dialog open={deployDialogOpen} onOpenChange={setDeployDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Deploy to Vercel</DialogTitle>
+              <DialogDescription>
+                Enter your Vercel access token to deploy this project. You can
+                create one at{" "}
+                <a
+                  href="https://vercel.com/account/tokens"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary underline hover:no-underline"
+                >
+                  vercel.com/account/tokens
+                </a>
+                .
+              </DialogDescription>
+            </DialogHeader>
+
+            {deployResult ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 rounded-md bg-emerald-500/10 p-3">
+                  <Check className="size-4 text-emerald-500" />
+                  <span className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                    Deployed successfully!
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={deployResult.url}
+                    readOnly
+                    className="h-8 text-xs"
+                  />
+                  <Button size="sm" variant="outline" asChild>
+                    <a
+                      href={deployResult.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <ExternalLink className="size-3" />
+                      Open
+                    </a>
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <Input
+                  type="password"
+                  placeholder="Vercel access token"
+                  value={vercelToken}
+                  onChange={(e) => setVercelToken(e.target.value)}
+                  className="h-8 text-xs"
+                  disabled={deploying}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && vercelToken.trim() && !deploying) {
+                      handleDeploy();
+                    }
+                  }}
+                />
+                {deployError && (
+                  <p className="text-xs text-destructive">{deployError}</p>
+                )}
+              </div>
+            )}
+
+            <DialogFooter>
+              {deployResult ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setDeployDialogOpen(false)}
+                >
+                  Close
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  onClick={handleDeploy}
+                  disabled={deploying || !vercelToken.trim()}
+                >
+                  {deploying && <Loader2 className="size-3 animate-spin" />}
+                  {deploying ? "Deploying..." : "Deploy"}
+                </Button>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* GitHub repo dialog */}
+        <Dialog open={ghDialogOpen} onOpenChange={setGhDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Push to GitHub</DialogTitle>
+              <DialogDescription>
+                Create a new GitHub repository with your build files. You need a
+                personal access token with the{" "}
+                <code className="rounded bg-muted px-1 text-[11px]">repo</code>{" "}
+                scope from{" "}
+                <a
+                  href="https://github.com/settings/tokens/new?scopes=repo&description=Calypso"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary underline hover:no-underline"
+                >
+                  github.com/settings/tokens
+                </a>
+                .
+              </DialogDescription>
+            </DialogHeader>
+
+            {ghResult ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 rounded-md bg-emerald-500/10 p-3">
+                  <Check className="size-4 text-emerald-500" />
+                  <span className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                    Repository created!
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={ghResult.url}
+                    readOnly
+                    className="h-8 text-xs"
+                  />
+                  <Button size="sm" variant="outline" asChild>
+                    <a
+                      href={ghResult.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <ExternalLink className="size-3" />
+                      Open
+                    </a>
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <Input
+                  type="password"
+                  placeholder="GitHub personal access token"
+                  value={ghToken}
+                  onChange={(e) => setGhToken(e.target.value)}
+                  className="h-8 text-xs"
+                  disabled={ghCreating}
+                />
+                <Input
+                  placeholder="Repository name"
+                  value={ghRepoName}
+                  onChange={(e) => setGhRepoName(e.target.value)}
+                  className="h-8 text-xs"
+                  disabled={ghCreating}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && ghToken.trim() && !ghCreating) {
+                      handleGhCreate();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setGhPrivate((p) => !p)}
+                  className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  disabled={ghCreating}
+                >
+                  {ghPrivate ? (
+                    <Lock className="size-3" />
+                  ) : (
+                    <Unlock className="size-3" />
+                  )}
+                  {ghPrivate ? "Private repository" : "Public repository"}
+                </button>
+                {ghError && (
+                  <p className="text-xs text-destructive">{ghError}</p>
+                )}
+              </div>
+            )}
+
+            <DialogFooter>
+              {ghResult ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setGhDialogOpen(false)}
+                >
+                  Close
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  onClick={handleGhCreate}
+                  disabled={ghCreating || !ghToken.trim()}
+                >
+                  {ghCreating && <Loader2 className="size-3 animate-spin" />}
+                  {ghCreating ? "Creating..." : "Create Repository"}
+                </Button>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }
@@ -803,6 +1340,11 @@ export function BuildContent() {
         onOpenChange={setUpgradeOpen}
         feature="Building projects requires a Pro or Founding plan. Upgrade to generate your full codebase."
       />
+      <UpgradeModal
+        open={publishUpgradeOpen}
+        onOpenChange={setPublishUpgradeOpen}
+        feature="Publishing requires a Pro or Founding plan. Upgrade to get a live URL for your project."
+      />
     </div>
   );
 }
@@ -856,6 +1398,7 @@ function FileTreeView({
   onSelectFile,
   onToggleDir,
   depth,
+  streamingPath,
 }: {
   nodes: TreeNode[];
   selectedFile: string | null;
@@ -863,6 +1406,7 @@ function FileTreeView({
   onSelectFile: (path: string) => void;
   onToggleDir: (path: string) => void;
   depth: number;
+  streamingPath?: string | null;
 }) {
   return (
     <>
@@ -891,12 +1435,14 @@ function FileTreeView({
                   onSelectFile={onSelectFile}
                   onToggleDir={onToggleDir}
                   depth={depth + 1}
+                  streamingPath={streamingPath}
                 />
               )}
             </div>
           );
         }
 
+        const isStreaming = streamingPath === node.path;
         const Icon = getFileIcon(node.name);
         return (
           <button
@@ -906,11 +1452,20 @@ function FileTreeView({
               "flex w-full items-center gap-1.5 rounded px-2 py-0.5 text-[11px] transition-colors",
               selectedFile === node.path
                 ? "bg-primary/10 text-primary font-medium"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                : isStreaming
+                  ? "text-primary/70"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
             )}
             style={{ paddingLeft: `${depth * 12 + 20}px` }}
           >
-            <Icon className="size-3 shrink-0" />
+            {isStreaming ? (
+              <span className="relative flex size-3 shrink-0 items-center justify-center">
+                <span className="absolute inline-flex size-2 animate-ping rounded-full bg-primary/50" />
+                <span className="relative inline-flex size-1.5 rounded-full bg-primary" />
+              </span>
+            ) : (
+              <Icon className="size-3 shrink-0" />
+            )}
             <span className="truncate">{node.name}</span>
           </button>
         );
