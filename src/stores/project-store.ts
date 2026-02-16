@@ -319,7 +319,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
 
     const pageDesignIds = new Set(
       state.designs
-        .filter((d) => d.pageId && d.html.length > 0)
+        .filter((d) => d.pageId && d.html && d.html.length > 0)
         .map((d) => d.pageId),
     );
     const toGenerate = state.pages.filter((p) => !pageDesignIds.has(p.id));
@@ -352,7 +352,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
     // Filter to pages that still need generation
     const designedPageIds = new Set(
       state.designs
-        .filter((d) => d.pageId && d.html.length > 0)
+        .filter((d) => d.pageId && d.html && d.html.length > 0)
         .map((d) => d.pageId),
     );
     const remainingIds = new Set(pageIds.filter((id) => !designedPageIds.has(id)));
