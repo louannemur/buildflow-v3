@@ -87,6 +87,9 @@ export function DesignsContent() {
     function scrollToHash() {
       const hash = window.location.hash.slice(1);
       if (!hash) return;
+      document.querySelectorAll(".ring-2.ring-primary").forEach((prev) => {
+        prev.classList.remove("ring-2", "ring-primary", "rounded-xl");
+      });
       setTimeout(() => {
         const el = document.getElementById(hash);
         if (el) {
@@ -287,7 +290,7 @@ export function DesignsContent() {
                   : designHtmlMap.get(design.id) ?? "")
               : "";
             return (
-              <motion.div key={page.id} id={page.id} variants={staggerItem}>
+              <motion.div key={page.id} id={page.id} variants={staggerItem} className="h-full">
                 <DesignCard
                   page={page}
                   design={design ? { ...design, html } : null}
@@ -323,7 +326,7 @@ function DesignCard({
   return (
     <Card
       className={cn(
-        "group cursor-pointer overflow-hidden transition-all hover:shadow-md",
+        "group h-full cursor-pointer overflow-hidden transition-all hover:shadow-md",
         isStyleGuide
           ? "border-amber-500/40 ring-1 ring-amber-500/20 hover:border-amber-500/60"
           : "hover:border-primary/50",

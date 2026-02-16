@@ -109,6 +109,10 @@ export function FeaturesContent() {
     function scrollToHash() {
       const hash = window.location.hash.slice(1);
       if (!hash) return;
+      // Clear any existing highlight
+      document.querySelectorAll(".ring-2.ring-primary").forEach((prev) => {
+        prev.classList.remove("ring-2", "ring-primary", "rounded-xl");
+      });
       setTimeout(() => {
         const el = document.getElementById(hash);
         if (el) {
@@ -788,6 +792,7 @@ function FeatureCard({ feature, onEdit, onDelete }: FeatureCardProps) {
       animate="visible"
       exit="exit"
       layout
+      className="h-full"
     >
       <div
         className={cn(

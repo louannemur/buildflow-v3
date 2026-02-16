@@ -112,6 +112,9 @@ export function PagesContent() {
     function scrollToHash() {
       const hash = window.location.hash.slice(1);
       if (!hash) return;
+      document.querySelectorAll(".ring-2.ring-primary").forEach((prev) => {
+        prev.classList.remove("ring-2", "ring-primary", "rounded-xl");
+      });
       setTimeout(() => {
         const el = document.getElementById(hash);
         if (el) {
@@ -462,7 +465,7 @@ export function PagesContent() {
             className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
           >
             {pages.map((page) => (
-              <motion.div key={page.id} id={page.id} variants={staggerItem}>
+              <motion.div key={page.id} id={page.id} variants={staggerItem} className="h-full">
                 <PageCard
                   page={page}
                   onOpen={() => openDetail(page)}
@@ -729,7 +732,7 @@ function PageCard({
 
   return (
     <Card
-      className="group cursor-pointer transition-colors hover:border-primary/50"
+      className="group h-full cursor-pointer transition-colors hover:border-primary/50"
       onClick={onOpen}
     >
       <CardHeader className="flex flex-row items-start justify-between gap-2 pb-2">

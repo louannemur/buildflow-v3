@@ -132,6 +132,9 @@ export function FlowsContent() {
     function scrollToHash() {
       const hash = window.location.hash.slice(1);
       if (!hash) return;
+      document.querySelectorAll(".ring-2.ring-primary").forEach((prev) => {
+        prev.classList.remove("ring-2", "ring-primary", "rounded-xl");
+      });
       setTimeout(() => {
         const el = document.getElementById(hash);
         if (el) {
