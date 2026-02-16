@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
 import { useTheme } from "next-themes";
 import {
@@ -86,8 +86,6 @@ interface ProjectContextValue {
   project: ProjectData;
   activeStep: ProjectStep | null;
   setActiveStep: (step: ProjectStep) => void;
-  activeItemId: string | null;
-  setActiveItemId: (id: string | null) => void;
 }
 
 const ProjectContext = createContext<ProjectContextValue | null>(null);
@@ -210,15 +208,11 @@ function SidebarContent({
   activeStep,
   onStepClick,
   onOverviewClick,
-  activeItemId,
-  onItemClick,
 }: {
   project: ProjectData;
   activeStep: ProjectStep | null;
   onStepClick: (step: ProjectStep) => void;
   onOverviewClick: () => void;
-  activeItemId: string | null;
-  onItemClick: (step: ProjectStep, itemId: string) => void;
 }) {
   // Read live data from the store for sidebar items
   const storeProject = useProjectStore((s) => s.project);
@@ -334,18 +328,12 @@ function SidebarContent({
                     <CollapsibleContent>
                       <div className="space-y-0.5 pb-2 pl-2">
                         {items.map((item) => (
-                          <button
+                          <div
                             key={item.id}
-                            onClick={() => onItemClick(step.key, item.id)}
-                            className={cn(
-                              "flex w-full items-center rounded-md px-2 py-1.5 text-xs transition-colors",
-                              activeItemId === item.id
-                                ? "font-medium text-primary"
-                                : "text-muted-foreground hover:text-foreground"
-                            )}
+                            className="flex w-full items-center rounded-md px-2 py-1.5 text-xs text-muted-foreground"
                           >
                             <span className="truncate">{item.title}</span>
-                          </button>
+                          </div>
                         ))}
                       </div>
                     </CollapsibleContent>
@@ -386,7 +374,6 @@ export function ProjectLayout({
   children: ReactNode;
 }) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const router = useRouter();
   const { sidebarOpen, toggleSidebar } = useAppStore();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -403,10 +390,6 @@ export function ProjectLayout({
   const [activeStep, setActiveStepState] = useState<ProjectStep | null>(
     stepFromPath ?? (isBasePath ? null : project.currentStep)
   );
-  const [activeItemId, setActiveItemId] = useState<string | null>(
-    searchParams.get("item")
-  );
-
   // Keep activeStep in sync when URL changes
   if (isBasePath && activeStep !== null) {
     setActiveStepState(null);
@@ -427,7 +410,6 @@ export function ProjectLayout({
   const setActiveStep = useCallback(
     (step: ProjectStep) => {
       setActiveStepState(step);
-      setActiveItemId(null);
       router.push(`${projectBasePath}/${step}`);
     },
     [projectBasePath, router]
@@ -435,23 +417,8 @@ export function ProjectLayout({
 
   const goToOverview = useCallback(() => {
     setActiveStepState(null);
-    setActiveItemId(null);
     router.push(projectBasePath);
   }, [projectBasePath, router]);
-
-  const handleItemClick = useCallback(
-    (step: ProjectStep, itemId: string) => {
-      setActiveStepState(step);
-      setActiveItemId(itemId);
-      // Design items navigate to the editor page (pageId as route param)
-      const url = step === "designs"
-        ? `${projectBasePath}/designs/${itemId}`
-        : `${projectBasePath}/${step}?item=${itemId}`;
-      router.push(url);
-      setMobileOpen(false);
-    },
-    [projectBasePath, router]
-  );
 
   const handleStepClick = useCallback(
     (step: ProjectStep) => {
@@ -472,8 +439,6 @@ export function ProjectLayout({
         project,
         activeStep,
         setActiveStep,
-        activeItemId,
-        setActiveItemId,
       }}
     >
       <div className="flex min-h-svh flex-col">
@@ -498,8 +463,6 @@ export function ProjectLayout({
                     activeStep={activeStep}
                     onStepClick={handleStepClick}
                     onOverviewClick={handleOverviewClick}
-                    activeItemId={activeItemId}
-                    onItemClick={handleItemClick}
                   />
                 </SheetContent>
               </Sheet>
@@ -562,8 +525,6 @@ export function ProjectLayout({
                 activeStep={activeStep}
                 onStepClick={handleStepClick}
                 onOverviewClick={handleOverviewClick}
-                activeItemId={activeItemId}
-                onItemClick={handleItemClick}
               />
             </div>
           </aside>
