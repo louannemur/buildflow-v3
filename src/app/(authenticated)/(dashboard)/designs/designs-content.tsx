@@ -428,13 +428,13 @@ function EmptyState({
     all: {
       title: "No designs yet",
       description:
-        "Designs let you create beautiful UI components and pages with AI-powered generation.",
+        "Designs let you create beautiful pages with AI-powered generation.",
       showCta: true,
     },
     standalone: {
       title: "No standalone designs",
       description:
-        "Standalone designs live outside of projects — perfect for quick experiments and one-off components.",
+        "Standalone designs live outside of projects — perfect for quick experiments and one-off pages.",
       showCta: true,
     },
     project: {

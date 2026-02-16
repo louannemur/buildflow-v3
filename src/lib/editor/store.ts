@@ -62,7 +62,6 @@ export interface EditorState {
   // Panel visibility
   showLayers: boolean;
   showProperties: boolean;
-  showComponents: boolean;
   showChat: boolean;
   showHistory: boolean;
 
@@ -102,7 +101,6 @@ export interface EditorState {
   // Panels
   toggleLayers: () => void;
   toggleProperties: () => void;
-  toggleComponents: () => void;
   toggleChat: () => void;
   setShowChat: (show: boolean) => void;
   toggleHistory: () => void;
@@ -146,7 +144,6 @@ const initialState = {
   breakpoint: "desktop" as Breakpoint,
   showLayers: false,
   showProperties: false,
-  showComponents: false,
   showChat: false,
   showHistory: false,
   undoStack: [] as string[],
@@ -255,7 +252,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   // ─── Panels ─────────────────────────────────────────────────
   toggleLayers: () => set((s) => ({ showLayers: !s.showLayers })),
   toggleProperties: () => set((s) => ({ showProperties: !s.showProperties })),
-  toggleComponents: () => set((s) => ({ showComponents: !s.showComponents })),
   toggleChat: () => set((s) => ({ showChat: !s.showChat })),
   setShowChat: (show) => set({ showChat: show }),
   toggleHistory: () => set((s) => ({ showHistory: !s.showHistory })),

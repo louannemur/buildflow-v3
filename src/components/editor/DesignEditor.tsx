@@ -11,13 +11,11 @@ import { Toolbar } from "./Toolbar";
 import { StylePickerModal } from "./StylePickerModal";
 import type { GenerateConfig } from "./StylePickerModal";
 import { StreamingIndicator } from "./StreamingOverlay";
-import { ComponentLibrary } from "./ComponentLibrary";
 import { VersionHistory } from "./VersionHistory";
 import { EditorChatPanel } from "./EditorChatPanel";
 import { useAIGenerate } from "@/hooks/useAIGenerate";
 import { useChatHistoryStore } from "@/stores/chat-history-store";
 import { UpgradeModal } from "@/components/features/upgrade-modal";
-import { COMPONENT_SECTIONS } from "@/lib/design/component-library";
 import { extractHtmlFromStream } from "@/lib/ai/extract-code";
 
 
@@ -67,7 +65,6 @@ export function DesignEditor({
   const setSelectedBfId = useEditorStore((s) => s.setSelectedBfId);
   const showLayers = useEditorStore((s) => s.showLayers);
   const showProperties = useEditorStore((s) => s.showProperties);
-  const showComponents = useEditorStore((s) => s.showComponents);
   const showChat = useEditorStore((s) => s.showChat);
   const showHistory = useEditorStore((s) => s.showHistory);
   const deleteElement = useEditorStore((s) => s.deleteElement);
@@ -79,7 +76,6 @@ export function DesignEditor({
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const [stylePickerOpen, setStylePickerOpen] = useState(false);
-  const [selectedComponentIds, setSelectedComponentIds] = useState<string[]>([]);
 
   // Refs for live iframe streaming
   const streamHtmlStartedRef = useRef(false);
@@ -416,35 +412,6 @@ export function DesignEditor({
     [designId, deleteElement],
   );
 
-  // ─── Component Library ─────────────────────────────────────────────
-
-  const handleToggleComponent = useCallback((id: string) => {
-    setSelectedComponentIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
-  }, []);
-
-  const handleAddComponents = useCallback(async () => {
-    if (selectedComponentIds.length === 0) return;
-
-    const sections = selectedComponentIds
-      .map((id) => COMPONENT_SECTIONS.find((s) => s.id === id))
-      .filter(Boolean);
-
-    const prompt =
-      "Add the following sections to the page, matching the existing design style:\n" +
-      sections.map((s) => `- ${s!.name}: ${s!.promptSnippet}`).join("\n");
-
-    const lastBfId = useEditorStore.getState().elementTree.at(-1)?.bfId;
-    if (lastBfId) {
-      await handleAddSection(lastBfId, prompt);
-    } else {
-      await handleEditDesign(prompt);
-    }
-
-    setSelectedComponentIds([]);
-  }, [selectedComponentIds, handleAddSection, handleEditDesign]);
-
   // ─── Properties Panel code change handler ──────────────────────────
 
   const handlePropertiesCodeChange = useCallback(
@@ -567,16 +534,6 @@ export function DesignEditor({
               onCodeChange={handlePropertiesCodeChange}
             />
           </div>
-        )}
-
-        {/* Right: Components library (design mode, toggled) */}
-        {mode === "design" && showComponents && (
-          <ComponentLibrary
-            selectedIds={selectedComponentIds}
-            onToggleSection={handleToggleComponent}
-            onAddSelected={handleAddComponents}
-            onClose={() => useEditorStore.getState().toggleComponents()}
-          />
         )}
 
         {/* Right: Version history (toggled) */}

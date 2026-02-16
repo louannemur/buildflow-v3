@@ -20,7 +20,6 @@ import {
   Loader2,
   Check,
   Layers,
-  LayoutGrid,
   MessageSquare,
   History,
 } from "lucide-react";
@@ -101,8 +100,6 @@ export function Toolbar({
   const projectId = useEditorStore((s) => s.projectId);
   const showLayers = useEditorStore((s) => s.showLayers);
   const toggleLayers = useEditorStore((s) => s.toggleLayers);
-  const showComponents = useEditorStore((s) => s.showComponents);
-  const toggleComponents = useEditorStore((s) => s.toggleComponents);
   const showChat = useEditorStore((s) => s.showChat);
   const toggleChat = useEditorStore((s) => s.toggleChat);
   const showHistory = useEditorStore((s) => s.showHistory);
@@ -347,26 +344,6 @@ export function Toolbar({
                 </button>
               </TooltipTrigger>
               <TooltipContent>Layers</TooltipContent>
-            </Tooltip>
-          )}
-
-          {/* Components toggle */}
-          {mode === "design" && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={toggleComponents}
-                  className={cn(
-                    "flex size-7 items-center justify-center rounded-md transition-colors",
-                    showComponents
-                      ? "bg-accent text-foreground"
-                      : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
-                  )}
-                >
-                  <LayoutGrid className="size-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>Components</TooltipContent>
             </Tooltip>
           )}
 
