@@ -310,7 +310,7 @@ export function BuildContent() {
   const designedPageCount = useMemo(() => {
     const pageIds = new Set(projPages.map((p) => p.id));
     return projDesigns.filter(
-      (d) => d.pageId && pageIds.has(d.pageId) && d.html.length > 0,
+      (d) => d.pageId && pageIds.has(d.pageId) && d.html && d.html.length > 0,
     ).length;
   }, [projPages, projDesigns]);
 

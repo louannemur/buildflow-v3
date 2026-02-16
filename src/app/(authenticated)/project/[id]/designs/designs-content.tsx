@@ -297,7 +297,7 @@ function DesignCard({
   isStyleGuide: boolean;
   onClick: () => void;
 }) {
-  const hasDesign = design && design.html.length > 0;
+  const hasDesign = design && design.html && design.html.length > 0;
 
   return (
     <Card
