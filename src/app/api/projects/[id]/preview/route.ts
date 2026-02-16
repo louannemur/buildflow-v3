@@ -29,14 +29,52 @@ function makeGateScript(token: string) {
 
 /* ─── Banner script injected into the preview site ────────────────────────── */
 
-function makeBannerScript(projectId: string, appDomain: string) {
+function makeBannerScript(
+  projectId: string,
+  appDomain: string,
+  previewToken: string,
+) {
+  // The banner fetches publish status from our API and renders accordingly:
+  // - Not published      → "Preview · Not published" + Publish button
+  // - Published & current → "Preview · Published" + View site link
+  // - Published & stale  → "Preview · Update available" + Update button
   return `(function(){
-  if(window.__pvBanner)return;window.__pvBanner=true;
-  var d=document,b=d.createElement('div');
-  b.setAttribute('style','position:fixed;top:0;left:0;right:0;z-index:999999;display:flex;align-items:center;justify-content:space-between;padding:8px 16px;background:#18181b;color:#fff;font-family:system-ui,-apple-system,sans-serif;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.15);');
-  b.innerHTML='<div style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.6"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg><span style="opacity:.7">Preview</span><span style="background:rgba(245,158,11,.15);color:#f59e0b;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:500">Not published</span></div><a href="'+appDomain+'/project/${projectId}/build" style="display:inline-flex;align-items:center;gap:6px;padding:5px 14px;background:#fff;color:#18181b;border-radius:6px;text-decoration:none;font-size:12px;font-weight:600;transition:opacity .15s" onmouseover="this.style.opacity=\\'0.9\\'" onmouseout="this.style.opacity=\\'1\\'"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m16 16-4-4-4 4"/></svg>Publish</a>';
-  d.body.prepend(b);
-  d.body.style.paddingTop='40px';
+if(window.__pvBanner)return;window.__pvBanner=true;
+var PID='${projectId}',APP='${appDomain}',TK='${previewToken}';
+var d=document,b=d.createElement('div');
+var bs='position:fixed;top:0;left:0;right:0;z-index:999999;display:flex;align-items:center;justify-content:space-between;padding:8px 16px;background:#18181b;color:#fff;font-family:system-ui,-apple-system,sans-serif;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.15);';
+b.setAttribute('style',bs);
+var eyeSvg='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.6"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
+var btnBase='display:inline-flex;align-items:center;gap:6px;padding:5px 14px;border-radius:6px;text-decoration:none;font-size:12px;font-weight:600;transition:opacity .15s;cursor:pointer;border:none;';
+var btnWhite=btnBase+'background:#fff;color:#18181b;';
+var btnOutline=btnBase+'background:transparent;color:#fff;border:1px solid rgba(255,255,255,.25);';
+function badge(text,bg,fg){return '<span style="background:'+bg+';color:'+fg+';padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:500">'+text+'</span>';}
+function btn(href,label,style){return '<a href="'+href+'" style="'+style+'" onmouseover="this.style.opacity=\\'0.85\\'" onmouseout="this.style.opacity=\\'1\\'">'+label+'</a>';}
+b.innerHTML='<div style="display:flex;align-items:center;gap:8px">'+eyeSvg+'<span style="opacity:.7">Preview</span></div><div></div>';
+d.body.prepend(b);d.body.style.paddingTop='40px';
+fetch(APP+'/api/projects/'+PID+'/preview/status?token='+TK)
+.then(function(r){return r.json()})
+.then(function(s){
+  var left='<div style="display:flex;align-items:center;gap:8px">'+eyeSvg+'<span style="opacity:.7">Preview</span>';
+  var right='';
+  if(s.published&&!s.isStale){
+    left+=badge('Published','rgba(34,197,94,.15)','#22c55e');
+    left+='</div>';
+    right=btn(s.url,'View published site',btnOutline)+btn(APP+'/project/'+PID+'/build','Back to editor',btnWhite);
+  }else if(s.published&&s.isStale){
+    left+=badge('Update available','rgba(245,158,11,.15)','#f59e0b');
+    left+='</div>';
+    right=btn(s.url,'View published site',btnOutline)+btn(APP+'/project/'+PID+'/build','Update published site',btnWhite);
+  }else{
+    left+=badge('Not published','rgba(245,158,11,.15)','#f59e0b');
+    left+='</div>';
+    right=btn(APP+'/project/'+PID+'/build','Publish',btnWhite);
+  }
+  b.innerHTML=left+'<div style="display:flex;align-items:center;gap:8px">'+right+'</div>';
+})
+.catch(function(){
+  b.innerHTML='<div style="display:flex;align-items:center;gap:8px">'+eyeSvg+'<span style="opacity:.7">Preview</span>'+badge('Not published','rgba(245,158,11,.15)','#f59e0b')+'</div>'+btn(APP+'/project/'+PID+'/build','Publish',btnWhite);
+});
 })();`;
 }
 
@@ -153,7 +191,7 @@ export async function POST(
     // Prepare injected scripts
     const buildFiles = output.files as { path: string; content: string }[];
     const gateJs = makeGateScript(previewToken);
-    const bannerJs = makeBannerScript(projectId, appDomain);
+    const bannerJs = makeBannerScript(projectId, appDomain, previewToken);
 
     const injectedFiles = [...buildFiles];
 
