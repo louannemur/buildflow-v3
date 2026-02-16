@@ -30,7 +30,6 @@ import {
   ChevronRight,
   ChevronDown,
   ArrowLeft,
-  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -294,7 +293,6 @@ function SidebarContent({
           )}>
             {displayName}
           </h2>
-          <Sparkles className="size-3.5 shrink-0 text-primary/60" />
         </button>
       </div>
 
