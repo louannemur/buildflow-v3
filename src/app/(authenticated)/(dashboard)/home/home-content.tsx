@@ -128,6 +128,8 @@ export function HomeContent() {
   const [recents, setRecents] = useState<RecentItem[]>([]);
   const [recentsLoading, setRecentsLoading] = useState(true);
   const recentsCache = useRef<Partial<Record<Tab, RecentItem[]>>>({});
+  const recentsRef = useRef<HTMLDivElement>(null);
+  const recentsMinHeight = useRef(0);
 
   // ─── Auto-scroll chat (within container only) ───────────────────────
 
@@ -167,6 +169,17 @@ export function HomeContent() {
   useEffect(() => {
     fetchRecents(tab);
   }, [tab, fetchRecents]);
+
+  // Keep recents container at least as tall as the tallest tab content
+  useEffect(() => {
+    if (!recentsLoading && recentsRef.current) {
+      const h = recentsRef.current.scrollHeight;
+      if (h > recentsMinHeight.current) {
+        recentsMinHeight.current = h;
+      }
+      recentsRef.current.style.minHeight = `${recentsMinHeight.current}px`;
+    }
+  }, [recents, recentsLoading]);
 
   // ─── Project creation ─────────────────────────────────────────────────
 
@@ -616,7 +629,7 @@ export function HomeContent() {
               </TabsList>
             </div>
 
-            <div className="mt-4">
+            <div ref={recentsRef} className="mt-4">
               {recentsLoading ? (
                 <div className="grid auto-rows-fr gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                   {Array.from({ length: 4 }).map((_, i) => (
