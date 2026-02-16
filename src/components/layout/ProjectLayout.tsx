@@ -253,9 +253,9 @@ function SidebarContent({
     pages: storePages.length > 0
       ? storePages.map((p) => ({ id: p.id, title: p.title }))
       : project.pages,
-    designs: storeDesigns.length > 0
-      ? storeDesigns.map((d) => ({ id: d.id, title: d.name }))
-      : project.designs,
+    designs: storePages.length > 0
+      ? storePages.map((p) => ({ id: p.id, title: p.title }))
+      : project.pages,
   };
 
   function handleStepToggle(step: ProjectStep) {
@@ -445,7 +445,11 @@ export function ProjectLayout({
     (step: ProjectStep, itemId: string) => {
       setActiveStepState(step);
       setActiveItemId(itemId);
-      router.push(`${projectBasePath}/${step}?item=${itemId}`);
+      // Design items navigate to the editor page (pageId as route param)
+      const url = step === "designs"
+        ? `${projectBasePath}/designs/${itemId}`
+        : `${projectBasePath}/${step}?item=${itemId}`;
+      router.push(url);
       setMobileOpen(false);
     },
     [projectBasePath, router]
