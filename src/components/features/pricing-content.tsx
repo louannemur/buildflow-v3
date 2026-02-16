@@ -106,7 +106,7 @@ const tiers: Tier[] = [
       { label: "Unlimited saved designs", included: true },
       { label: "Full design + code editing", included: true },
       { label: "No watermark", included: true },
-      { label: "10 projects", included: true },
+      { label: "15 projects", included: true },
       { label: "200 AI generations / month", included: true },
       { label: "Full build & export", included: true },
       { label: "Priority AI", included: true },

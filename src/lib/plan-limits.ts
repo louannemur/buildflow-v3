@@ -33,7 +33,7 @@ const PLAN_LIMITS: Record<Plan, PlanLimits> = {
     canPublish: false,
   },
   pro: {
-    maxProjects: 10,
+    maxProjects: 15,
     maxDesigns: Infinity,
     maxPagesPerProject: Infinity,
     maxDesignGenerationsPerDay: Infinity,
@@ -43,7 +43,7 @@ const PLAN_LIMITS: Record<Plan, PlanLimits> = {
     canPublish: true,
   },
   founding: {
-    maxProjects: 10,
+    maxProjects: 15,
     maxDesigns: Infinity,
     maxPagesPerProject: Infinity,
     maxDesignGenerationsPerDay: Infinity,
