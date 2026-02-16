@@ -187,6 +187,20 @@
     @apply bg-background text-foreground antialiased;
   }
 
+  /* ─── Pointer cursor on interactive elements ────────────────────── */
+  button,
+  [role="button"],
+  [type="button"],
+  [type="submit"],
+  [type="reset"],
+  a,
+  select,
+  summary,
+  label[for],
+  [tabindex]:not([tabindex="-1"]) {
+    cursor: pointer;
+  }
+
   /* ─── Large text mode ─────────────────────────────────────────────── */
   html.large-text {
     font-size: 18px;
