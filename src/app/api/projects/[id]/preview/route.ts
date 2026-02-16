@@ -5,8 +5,6 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { projects, buildOutputs, buildConfigs } from "@/lib/db/schema";
 
-const PUBLISH_DOMAIN = process.env.PUBLISH_DOMAIN || "calypso.build";
-
 // Allow up to 2 minutes for deployment + polling
 export const maxDuration = 120;
 
@@ -146,18 +144,11 @@ export async function POST(
     // Generate preview token for access gating
     const previewToken = randomBytes(32).toString("hex");
 
-    // Random preview slug for calypso.build domain
-    const previewSlug = `pv-${randomBytes(8).toString("hex")}`;
-    const customDomain = `${previewSlug}.${PUBLISH_DOMAIN}`;
-    const previewUrl = `https://${customDomain}`;
     const vercelProjectName = `calypso-pv-${projectId.slice(0, 8)}-${randomBytes(4).toString("hex")}`;
 
     // Determine the app origin for the banner "Publish" link
     const appDomain =
-      process.env.NEXT_PUBLIC_APP_URL ||
-      (PUBLISH_DOMAIN === "calypso.build"
-        ? "https://calypso.build"
-        : "https://localhost:3000");
+      process.env.NEXT_PUBLIC_APP_URL || "https://calypso.build";
 
     // Prepare injected scripts
     const buildFiles = output.files as { path: string; content: string }[];
@@ -284,6 +275,11 @@ export async function POST(
     const deployId = deployment.id;
     const vercelProjectId = deployment.projectId ?? vercelProjectName;
 
+    // Use the Vercel-provided URL (has instant SSL, no cert provisioning delay)
+    const previewUrl = deployment.url
+      ? `https://${deployment.url}`
+      : `https://${vercelProjectName}.vercel.app`;
+
     // Poll for deployment ready (every 2s, up to 90s)
     if (deployId) {
       const maxWait = 90_000;
@@ -313,32 +309,6 @@ export async function POST(
           // Continue polling
         }
       }
-    }
-
-    // Assign calypso.build subdomain (same as publish)
-    try {
-      const domainRes = await fetch(
-        `https://api.vercel.com/v10/projects/${vercelProjectId}/domains${teamQuery}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ name: customDomain }),
-        },
-      );
-
-      if (!domainRes.ok && domainRes.status !== 409) {
-        console.error(
-          "Preview domain assignment failed:",
-          domainRes.status,
-          await domainRes.json().catch(() => ({})),
-        );
-        // Non-fatal — fall back to Vercel URL
-      }
-    } catch {
-      // Non-fatal
     }
 
     // Save preview info (including token)
