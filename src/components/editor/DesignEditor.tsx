@@ -73,6 +73,7 @@ export function DesignEditor({
   const undo = useEditorStore((s) => s.undo);
   const redo = useEditorStore((s) => s.redo);
   const setStreamingToIframe = useEditorStore((s) => s.setStreamingToIframe);
+  const setBreakpoint = useEditorStore((s) => s.setBreakpoint);
 
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -110,6 +111,12 @@ export function DesignEditor({
       pageId,
       styleGuideCode,
     });
+
+    // Auto-set mobile breakpoint for mobile app screens
+    const name = designName.toLowerCase();
+    if (/\b(mobile.?app|app.?screen|phone.?screen|ios.?screen|android.?screen|mobile.?screen|mobile.?view|app.?view)\b/.test(name) || (name.includes("mobile") && name.includes("app"))) {
+      setBreakpoint("mobile");
+    }
 
     return () => {
       reset();

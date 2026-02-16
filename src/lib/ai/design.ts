@@ -222,6 +222,11 @@ Design an organized preferences UI: sidebar navigation for setting categories, g
       return `PAGE TYPE: AUTHENTICATION PAGE (Login / Register / Sign Up).
 IMPORTANT: This is a functional auth form, NOT a marketing page. Do NOT design a landing page or hero section.
 Design a focused authentication experience: centered or split-layout form with email/password fields (custom-styled, not native browser inputs), social login buttons (Google, GitHub, etc.), password visibility toggle, "forgot password" link, and a switch between login/signup. The form should be the primary focus — minimal distractions. Consider a decorative side panel or subtle background, but the form IS the page. Think Vercel login, Linear signup, or Stripe auth.`;
+    case "MOBILE_APP":
+      return `PAGE TYPE: MOBILE APP SCREEN.
+IMPORTANT: This is a mobile app screen design. Design for a 375px-wide mobile viewport as the PRIMARY experience.
+Design a native-feeling mobile app interface: bottom tab navigation or top navigation bar, full-width content, touch-friendly tap targets (min 44px), card-based layouts, swipe-friendly elements. Think iOS/Android native app — not a responsive website. Use mobile patterns: bottom sheets, floating action buttons, pull-to-refresh indicators, status bar spacing.
+The design MUST use w-full and fill the viewport width naturally. Use min-h-screen. No max-width containers — content should go edge-to-edge. On larger viewports (tablet/desktop), the design should still stretch to fill the available width gracefully.`;
     case "CUSTOM":
     default:
       return `PAGE TYPE: CUSTOM — analyze the page name carefully.
@@ -234,6 +239,11 @@ IMPORTANT: Do NOT default to a marketing landing page. Look at the page name and
  */
 export function inferPageType(pageName: string): string {
   const name = pageName.toLowerCase().trim();
+
+  // Mobile app screens
+  if (/\b(mobile.?app|app.?screen|phone.?screen|ios.?screen|android.?screen|mobile.?screen|mobile.?view|app.?view)\b/.test(name) || (name.includes("mobile") && name.includes("app"))) {
+    return "MOBILE_APP";
+  }
 
   // Auth pages
   if (/\b(login|log.in|sign.?in|sign.?up|register|registration|forgot.?password|reset.?password|auth|verify|two.?factor|2fa|otp)\b/.test(name)) {
