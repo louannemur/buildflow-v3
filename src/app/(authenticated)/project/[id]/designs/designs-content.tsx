@@ -188,14 +188,19 @@ export function DesignsContent() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          {pagesWithoutDesign.length > 0 && !generating && (
+          {pagesWithoutDesign.length > 0 && (
             <Button
               variant="outline"
               size="sm"
               onClick={handleGenerateAll}
+              disabled={generating}
             >
-              <Sparkles className="size-4" />
-              Generate All ({pagesWithoutDesign.length})
+              {generating ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Sparkles className="size-4" />
+              )}
+              Generate All ({generating ? genTotal - genProgress : pagesWithoutDesign.length})
             </Button>
           )}
         </div>
