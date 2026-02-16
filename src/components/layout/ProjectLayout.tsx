@@ -5,6 +5,7 @@ import {
   useContext,
   useState,
   useCallback,
+  useEffect,
   type ReactNode,
 } from "react";
 import Link from "next/link";
@@ -417,6 +418,13 @@ export function ProjectLayout({
 
   // Extract the base project path (e.g. /project/abc123)
   const projectBasePath = pathname.match(/^\/project\/[^/]+/)?.[0] ?? pathname;
+
+  // Prefetch all step routes for instant navigation
+  useEffect(() => {
+    for (const step of ["features", "flows", "pages", "designs", "build"]) {
+      router.prefetch(`${projectBasePath}/${step}`);
+    }
+  }, [projectBasePath, router]);
 
   const setActiveStep = useCallback(
     (step: ProjectStep) => {
