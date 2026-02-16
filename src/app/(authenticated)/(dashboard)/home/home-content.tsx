@@ -40,6 +40,7 @@ type RecentItem =
       name: string;
       description: string | null;
       thumbnail: string | null;
+      previewHtml: string | null;
       currentStep: string;
       updatedAt: string;
     }
@@ -48,6 +49,7 @@ type RecentItem =
       id: string;
       name: string;
       thumbnail: string | null;
+      previewHtml: string | null;
       updatedAt: string;
     };
 
@@ -616,7 +618,7 @@ export function HomeContent() {
 
             <TabsContent value={tab} className="mt-4">
               {recentsLoading ? (
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                <div className="grid auto-rows-fr gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                   {Array.from({ length: 4 }).map((_, i) => (
                     <div key={i} className="space-y-2">
                       <Skeleton className="aspect-[16/10] w-full rounded-lg" />
@@ -628,7 +630,7 @@ export function HomeContent() {
               ) : recents.length === 0 ? (
                 <EmptyState tab={tab} />
               ) : (
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                <div className="grid auto-rows-fr gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                   {recents.slice(0, 7).map((item) =>
                     item.type === "project" ? (
                       <ProjectCard
@@ -637,6 +639,7 @@ export function HomeContent() {
                         name={item.name}
                         description={item.description}
                         thumbnail={item.thumbnail}
+                        previewHtml={item.previewHtml}
                         updatedAt={formatRelativeDate(item.updatedAt)}
                       />
                     ) : (
@@ -645,6 +648,7 @@ export function HomeContent() {
                         id={item.id}
                         name={item.name}
                         thumbnail={item.thumbnail}
+                        previewHtml={item.previewHtml}
                         updatedAt={formatRelativeDate(item.updatedAt)}
                       />
                     ),

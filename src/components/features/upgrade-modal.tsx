@@ -39,7 +39,7 @@ export function UpgradeModal({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Maybe Later
           </Button>
-          <Button onClick={() => router.push("/pricing")}>View Plans</Button>
+          <Button onClick={() => router.push("/plans")}>View Plans</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

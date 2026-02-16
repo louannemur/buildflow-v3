@@ -46,7 +46,7 @@ export function CheckoutContent() {
     } catch {
       // Fall through to pricing page
     }
-    router.push("/pricing");
+    router.push("/plans");
   }, [router]);
 
   const fetchClientSecret = useCallback(async () => {
@@ -91,7 +91,7 @@ export function CheckoutContent() {
         <div className="text-center">
           <p className="text-muted-foreground">Invalid plan selected.</p>
           <Button asChild variant="outline" size="sm" className="mt-4">
-            <Link href="/pricing">Back to Pricing</Link>
+            <Link href="/plans">Back to Pricing</Link>
           </Button>
         </div>
       </div>
@@ -108,7 +108,7 @@ export function CheckoutContent() {
       <header className="border-b border-border/50 bg-background/80 backdrop-blur-xl">
         <div className="mx-auto flex h-14 max-w-4xl items-center gap-4 px-4 sm:px-6">
           <Button asChild variant="ghost" size="sm">
-            <Link href="/pricing">
+            <Link href="/plans">
               <ArrowLeft className="size-4" />
               <span className="sr-only">Back</span>
             </Link>

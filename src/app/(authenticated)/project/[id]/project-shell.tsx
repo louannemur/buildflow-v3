@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -19,23 +19,33 @@ export function ProjectShell({
 }) {
   const [error, setError] = useState(false);
   const [projectData, setProjectData] = useState<ProjectData | null>(null);
-
-  const {
-    setProject,
-    setFeatures,
-    setUserFlows,
-    setPages,
-    setDesigns,
-    setBuildConfig,
-    setLoading,
-    reset,
-  } = useProjectStore();
+  const prevId = useRef<string | null>(null);
 
   useEffect(() => {
+    // Same project already loaded — reuse store data
+    if (prevId.current === projectId) return;
+
+    const s = useProjectStore.getState();
+    if (s.project?.id === projectId && !s.loading) {
+      prevId.current = projectId;
+      setProjectData({
+        id: s.project.id,
+        name: s.project.name,
+        description: s.project.description,
+        currentStep: s.project.currentStep,
+        features: s.features.map((f) => ({ id: f.id, title: f.title })),
+        userFlows: s.userFlows.map((f) => ({ id: f.id, title: f.title })),
+        pages: s.pages.map((p) => ({ id: p.id, title: p.title })),
+        designs: s.designs.map((d) => ({ id: d.id, title: d.name })),
+      });
+      return;
+    }
+
     let cancelled = false;
+    prevId.current = projectId;
 
     async function fetchProject() {
-      setLoading(true);
+      useProjectStore.getState().setLoading(true);
       try {
         const res = await fetch(`/api/projects/${projectId}`);
 
@@ -45,11 +55,11 @@ export function ProjectShell({
         }
 
         const data = await res.json();
-
         if (cancelled) return;
 
-        // Populate Zustand store
-        setProject({
+        const store = useProjectStore.getState();
+
+        store.setProject({
           id: data.id,
           name: data.name,
           description: data.description,
@@ -59,13 +69,12 @@ export function ProjectShell({
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
         });
-        setFeatures(data.features ?? []);
-        setUserFlows(data.userFlows ?? []);
-        setPages(data.pages ?? []);
-        setDesigns(data.designs ?? []);
-        setBuildConfig(data.buildConfig ?? null);
+        store.setFeatures(data.features ?? []);
+        store.setUserFlows(data.userFlows ?? []);
+        store.setPages(data.pages ?? []);
+        store.setDesigns(data.designs ?? []);
+        store.setBuildConfig(data.buildConfig ?? null);
 
-        // Build ProjectData for the layout sidebar
         setProjectData({
           id: data.id,
           name: data.name,
@@ -99,7 +108,7 @@ export function ProjectShell({
       } catch {
         if (!cancelled) setError(true);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) useProjectStore.getState().setLoading(false);
       }
     }
 
@@ -107,19 +116,8 @@ export function ProjectShell({
 
     return () => {
       cancelled = true;
-      reset();
     };
-  }, [
-    projectId,
-    setProject,
-    setFeatures,
-    setUserFlows,
-    setPages,
-    setDesigns,
-    setBuildConfig,
-    setLoading,
-    reset,
-  ]);
+  }, [projectId]);
 
   if (error) {
     return (

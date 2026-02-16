@@ -104,7 +104,7 @@ export function DesignsContent() {
   const [designs, setDesigns] = useState<DesignItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [standaloneCount, setStandaloneCount] = useState(0);
-  const [maxDesigns, setMaxDesigns] = useState<number>(Infinity);
+  const [maxDesigns, setMaxDesigns] = useState<number>(-1);
 
   // Tab filter
   const [filter, setFilter] = useState<FilterTab>("all");
@@ -147,7 +147,7 @@ export function DesignsContent() {
   // ─── Actions ────────────────────────────────────────────────────────
 
   async function handleNewDesign() {
-    if (maxDesigns !== Infinity && standaloneCount >= maxDesigns) {
+    if (maxDesigns >= 0 && standaloneCount >= maxDesigns) {
       setUpgradeMessage(
         `You've reached your limit of ${maxDesigns} saved designs. Upgrade your plan for unlimited designs.`,
       );
@@ -294,7 +294,7 @@ export function DesignsContent() {
   // ─── Render ─────────────────────────────────────────────────────────
 
   const limitDisplay =
-    maxDesigns !== Infinity && maxDesigns > 0
+    maxDesigns >= 0
       ? `${standaloneCount} / ${maxDesigns} standalone designs used`
       : null;
 

@@ -29,7 +29,21 @@ export async function GET(
         pages: {
           orderBy: (pages, { asc }) => [asc(pages.order)],
         },
-        designs: true,
+        designs: {
+          columns: {
+            id: true,
+            name: true,
+            thumbnail: true,
+            fonts: true,
+            colors: true,
+            isStandalone: true,
+            isStyleGuide: true,
+            pageId: true,
+            createdAt: true,
+            updatedAt: true,
+            // html excluded — fetched lazily by the designs page
+          },
+        },
         buildConfig: true,
       },
     });

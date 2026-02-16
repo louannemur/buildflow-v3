@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useRef, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { motion } from "framer-motion";
@@ -22,6 +22,7 @@ import {
   type ProjectPage,
   type ProjectDesign,
 } from "@/stores/project-store";
+import { HtmlPreview } from "@/components/features/html-preview";
 import { cn } from "@/lib/utils";
 
 /* ─── Animation ──────────────────────────────────────────────────────────── */
@@ -104,6 +105,35 @@ export function DesignsContent() {
     () => pages.filter((p) => !pageDesignMap.has(p.id)),
     [pages, pageDesignMap],
   );
+
+  // Lazy-load design HTML (excluded from initial project fetch for speed)
+  const [designHtmlMap, setDesignHtmlMap] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    if (!project || designs.length === 0) return;
+    // If designs already have HTML loaded (from store), use them
+    const alreadyLoaded = designs.some((d) => d.html && d.html.length > 0);
+    if (alreadyLoaded) return;
+
+    // Fetch design HTML for this project's designs
+    let cancelled = false;
+    async function loadHtml() {
+      try {
+        const res = await fetch(`/api/projects/${project!.id}/designs/html`);
+        if (!res.ok || cancelled) return;
+        const data: { id: string; html: string }[] = await res.json();
+        if (cancelled) return;
+        const map = new Map<string, string>();
+        for (const d of data) {
+          if (d.html && d.html.length > 0) map.set(d.id, d.html);
+        }
+        setDesignHtmlMap(map);
+      } catch {
+        // Non-critical — cards will show placeholder
+      }
+    }
+    loadHtml();
+    return () => { cancelled = true; };
+  }, [project, designs]);
 
   // ─── Navigate to design editor ────────────────────────────────────
 
@@ -217,11 +247,17 @@ export function DesignsContent() {
         >
           {pages.map((page) => {
             const design = pageDesignMap.get(page.id);
+            // Use lazy-loaded HTML if the store doesn't have it
+            const html = design
+              ? (design.html && design.html.length > 0
+                  ? design.html
+                  : designHtmlMap.get(design.id) ?? "")
+              : "";
             return (
               <motion.div key={page.id} variants={staggerItem}>
                 <DesignCard
                   page={page}
-                  design={design ?? null}
+                  design={design ? { ...design, html } : null}
                   isStyleGuide={design?.isStyleGuide ?? false}
                   onClick={() => handleCardClick(page.id)}
                 />
@@ -311,84 +347,3 @@ function DesignCard({
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════ */
-/*  HTML Preview (iframe-based thumbnail)                                    */
-/* ═══════════════════════════════════════════════════════════════════════════ */
-
-function HtmlPreview({ html }: { html: string }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const [scale, setScale] = useState(0.25);
-
-  const IFRAME_W = 1280;
-  const IFRAME_H = 800;
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const update = () => {
-      const w = el.clientWidth;
-      if (w > 0) setScale(w / IFRAME_W);
-    };
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    update();
-    return () => ro.disconnect();
-  }, []);
-
-  useEffect(() => {
-    const iframe = iframeRef.current;
-    if (!iframe) return;
-
-    const doc = iframe.contentDocument;
-    if (!doc) return;
-
-    const isFullDoc =
-      html.trimStart().startsWith("<!DOCTYPE") ||
-      html.trimStart().startsWith("<html");
-
-    doc.open();
-    if (isFullDoc) {
-      const styled = html.replace(
-        "</head>",
-        `<style>body{overflow:hidden;pointer-events:none;}</style></head>`,
-      );
-      doc.write(styled);
-    } else {
-      doc.write(`
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <style>
-              body {
-                margin: 0;
-                overflow: hidden;
-                transform-origin: top left;
-                pointer-events: none;
-              }
-            </style>
-          </head>
-          <body>${html}</body>
-        </html>
-      `);
-    }
-    doc.close();
-  }, [html]);
-
-  return (
-    <div ref={containerRef} className="relative h-full w-full overflow-hidden">
-      <iframe
-        ref={iframeRef}
-        title="Design preview"
-        className="pointer-events-none origin-top-left border-none"
-        style={{
-          width: IFRAME_W,
-          height: IFRAME_H,
-          transform: `scale(${scale})`,
-        }}
-        sandbox="allow-scripts allow-same-origin"
-        tabIndex={-1}
-      />
-    </div>
-  );
-}

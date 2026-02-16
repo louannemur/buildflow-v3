@@ -58,7 +58,12 @@ export async function GET(req: Request) {
     const limits = getPlanLimits(plan);
 
     return NextResponse.json(
-      { items, standaloneCount, maxDesigns: limits.maxDesigns },
+      {
+        items,
+        standaloneCount,
+        // Infinity → null in JSON, which breaks client-side comparisons
+        maxDesigns: limits.maxDesigns === Infinity ? -1 : limits.maxDesigns,
+      },
       { status: 200 },
     );
   } catch {

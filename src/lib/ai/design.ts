@@ -62,6 +62,17 @@ Avoid the "centered stack of sections" pattern. Real sites use tension:
 - Vary section padding: py-16, py-24, py-32, py-40. Never the same twice in a row
 - Left-align body text. Center-align only standalone headlines or CTAs
 
+[Responsive — every design MUST work on all screens]:
+Design MOBILE-FIRST. Every layout must be usable on 375px screens and scale up.
+- Grid columns collapse on mobile: grid-cols-1 by default, sm:grid-cols-2, lg:grid-cols-3 etc. NEVER use multi-column grids without responsive breakpoints
+- Hero headlines scale down: text-3xl sm:text-4xl lg:text-6xl. NEVER use a fixed text-7xl that overflows on mobile
+- Navigation: use a simple horizontal nav that wraps or a hamburger pattern on mobile. NEVER let nav links overflow horizontally
+- Images and containers: use w-full and max-w-full so nothing overflows. NEVER use fixed pixel widths (w-[800px]) without responsive alternatives
+- Padding/margins: use responsive values — px-4 sm:px-6 lg:px-8. NEVER use large fixed padding (px-20) that wastes mobile space
+- Flexbox layouts: use flex-col on mobile, sm:flex-row or lg:flex-row for desktop. NEVER assume side-by-side layout works at all sizes
+- Touch targets: buttons and links must be at least h-10 (40px) with sufficient tap spacing on mobile
+- Test your mental model: if you put two items side-by-side, ask "does this work at 375px wide?" If not, stack them on mobile
+
 [Motion — subtle, not showy]:
 Use GSAP + ScrollTrigger for scroll reveals, CSS transitions for hover states, and IntersectionObserver for simple appear-on-scroll effects. Less is more — not everything needs to animate.
 For scroll reveals, use GSAP ScrollTrigger or vanilla IntersectionObserver:
@@ -126,7 +137,9 @@ STRUCTURE:
 9. Don't put a number/stat in every section. One stat section per page max.
 10. White space is a feature, not a bug. Sections with generous py-32 or py-40 and minimal content feel intentional and premium. Cramming content into every pixel feels cheap.
 11. Body text, descriptions, and card content are NEVER larger than text-base (1rem/16px). The ONLY exception is a single hero subtitle which may be text-lg. If you used text-xl or text-2xl on a paragraph or description, you failed.
-12. Card/feature titles max out at text-lg. Use font-semibold for hierarchy, not bigger sizes. Section headings (h2) max out at text-3xl. The hero headline is the ONLY text that gets to be huge.`;
+12. Card/feature titles max out at text-lg. Use font-semibold for hierarchy, not bigger sizes. Section headings (h2) max out at text-3xl. The hero headline is the ONLY text that gets to be huge.
+13. Every grid, flex layout, and text size MUST have responsive breakpoints. A design that breaks on mobile is a failed design. Use Tailwind responsive prefixes (sm:, md:, lg:) on ALL multi-column layouts and large text sizes.
+14. No horizontal overflow. Nothing should cause a horizontal scrollbar at any viewport width. No fixed-width elements wider than the viewport, no grids that don't collapse, no padding that pushes content off-screen.`;
 
 const EDIT_DESIGN_PROMPT = `You are editing an existing design. Focus on iterative improvements while maintaining the existing design structure.
 
@@ -140,7 +153,7 @@ const ELEMENT_MODIFY_PROMPT = `You are modifying a selected HTML element based o
 
 TASK: Modify the selected element based on the user's request and return ONLY the modified element with its EXACT data-bf-id preserved. Only output HTML with Tailwind classes. Any CSS styles should be in the style attribute. Make sure to always respect the structure and close tags properly. Use <i data-lucide="icon-name"></i> for icons.
 
-Typography rules: Be precise with font weights, going one level lighter than standard. Titles over 20px get tight letter spacing. Avoid px or em for font sizing, minimum size is text-xs. Everything must be responsive. Content text (paragraphs, descriptions, card text) must be text-sm or text-base — never text-lg or larger. Only hero headlines get large sizes.`;
+Typography rules: Be precise with font weights, going one level lighter than standard. Titles over 20px get tight letter spacing. Avoid px or em for font sizing, minimum size is text-xs. Content text (paragraphs, descriptions, card text) must be text-sm or text-base — never text-lg or larger. Only hero headlines get large sizes. All layouts must be responsive — use responsive Tailwind prefixes (sm:, md:, lg:) on grids, flex layouts, and large text sizes.`;
 
 const ADD_SECTION_PROMPT = `You are adding new content after a selected element. Think through the design, structure, and integration with the existing layout.
 
@@ -518,7 +531,7 @@ Return ONLY the new section HTML to be inserted. Add data-bf-id to every element
 
 // ── Review & Fix Design (Anthropic / Claude) ─────────────────────
 
-const REVIEW_SYSTEM_PROMPT = `You are a senior UI/UX quality reviewer. You receive a complete HTML page and must check it for readability and visual issues, then return a FIXED version.
+const REVIEW_SYSTEM_PROMPT = `You are a senior UI/UX quality reviewer. You receive a complete HTML page and must check it for readability, layout, and responsiveness issues, then return a FIXED version.
 
 CHECK FOR THESE ISSUES:
 
@@ -538,13 +551,25 @@ CHECK FOR THESE ISSUES:
 
 8. **Scroll behavior**: If the page has a transparent navbar with position:fixed or sticky, ensure it gets a background on scroll OR has a permanent semi-opaque background so content doesn't bleed through.
 
+9. **Non-responsive grids**: Any grid (grid-cols-2, grid-cols-3, grid-cols-4, etc.) that does NOT have responsive breakpoints. Multi-column grids MUST collapse to fewer columns on smaller screens. Fix by adding: grid-cols-1 as base, then sm:grid-cols-2, lg:grid-cols-3, etc. Same for flex layouts that place items side-by-side without responsive stacking (add flex-col as base, sm:flex-row or lg:flex-row).
+
+10. **Non-responsive typography**: Hero headlines using text-5xl, text-6xl, or text-7xl WITHOUT responsive scaling. Fix by adding breakpoint prefixes: text-3xl sm:text-4xl lg:text-6xl. Body text should not need scaling.
+
+11. **Fixed-width elements causing overflow**: Elements with fixed pixel widths (w-[600px], w-[800px], min-w-[500px]) that will overflow on mobile. Fix by using responsive widths (w-full max-w-2xl) or adding responsive breakpoints.
+
+12. **Non-responsive padding/margins**: Very large fixed padding (px-16, px-20, px-24) without responsive alternatives that wastes space on mobile. Fix by using responsive padding: px-4 sm:px-6 lg:px-8 or similar.
+
+13. **Side-by-side layouts without stacking**: Any flex-row or inline-flex layout that places content side-by-side without a mobile-first stacking fallback. Fix by adding flex-col as default and sm:flex-row or md:flex-row for larger screens.
+
+14. **Oversized body text**: Paragraphs, card descriptions, or feature text using text-lg, text-xl, or text-2xl. Body text should be text-sm or text-base. Only the hero headline should be large.
+
 RULES:
 - Return the COMPLETE fixed HTML document — not just the changed parts
-- Only change what's needed to fix readability issues. Do NOT redesign, restyle, or alter the creative direction
+- Only change what's needed to fix the issues above. Do NOT redesign, restyle, or alter the creative direction
 - Preserve ALL data-bf-id attributes exactly as they are
 - Preserve ALL animations, scripts, fonts, and the overall design concept
 - Preserve ALL content text — do not rewrite copy
-- If there are NO readability issues, return the HTML unchanged
+- If there are NO issues, return the HTML unchanged
 - Do NOT add comments about what you changed — just return the fixed HTML
 - Output ONLY the HTML document, no markdown code blocks, no explanation`;
 

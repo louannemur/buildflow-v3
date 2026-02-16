@@ -308,7 +308,7 @@ export function BillingContent() {
               <div className="flex items-center gap-3">
                 {isFree ? (
                   <Button asChild size="sm">
-                    <Link href="/pricing">
+                    <Link href="/plans">
                       <Sparkles className="mr-1.5 size-3.5" />
                       Upgrade Plan
                     </Link>
@@ -321,7 +321,7 @@ export function BillingContent() {
                 ) : (
                   <>
                     <Button asChild size="sm" variant="outline">
-                      <Link href="/pricing">
+                      <Link href="/plans">
                         <ArrowUpRight className="mr-1.5 size-3.5" />
                         Change Plan
                       </Link>
@@ -399,7 +399,7 @@ export function BillingContent() {
             <CardContent>
               {isFree ? (
                 <Button asChild size="sm">
-                  <Link href="/pricing">
+                  <Link href="/plans">
                     <Sparkles className="mr-1.5 size-3.5" />
                     View Plans
                   </Link>

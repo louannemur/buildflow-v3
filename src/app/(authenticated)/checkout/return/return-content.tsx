@@ -102,7 +102,7 @@ export function ReturnContent() {
           </p>
         </div>
         <Button asChild size="sm">
-          <Link href="/pricing">Back to Pricing</Link>
+          <Link href="/plans">Back to Pricing</Link>
         </Button>
       </div>
     </div>
