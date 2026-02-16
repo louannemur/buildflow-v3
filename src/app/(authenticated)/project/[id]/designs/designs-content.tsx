@@ -74,7 +74,10 @@ export function DesignsContent() {
     designGenerating: generating,
     designGenProgress: genProgress,
     designGenTotal: genTotal,
+    designGenCurrentPageName: genPageName,
+    designGenProjectId: genProjectId,
     generateAllDesigns,
+    resumeDesignGeneration,
   } = useProjectStore();
   const router = useRouter();
 
@@ -134,6 +137,13 @@ export function DesignsContent() {
     loadHtml();
     return () => { cancelled = true; };
   }, [project, designs]);
+
+  // Auto-resume batch generation on mount (handles page refresh / navigation back)
+  useEffect(() => {
+    if (!loading && project) {
+      resumeDesignGeneration();
+    }
+  }, [loading, project, resumeDesignGeneration]);
 
   // ─── Navigate to design editor ────────────────────────────────────
 
@@ -197,12 +207,14 @@ export function DesignsContent() {
       </div>
 
       {/* Batch generation progress */}
-      {generating && genTotal > 0 && (
+      {generating && genTotal > 0 && genProjectId === project.id && (
         <div className="mb-6 rounded-xl border border-border/60 bg-muted/30 p-4">
           <div className="mb-2 flex items-center justify-between text-sm">
             <span className="flex items-center gap-2 font-medium">
               <Loader2 className="size-4 animate-spin" />
-              Generating designs...
+              {genPageName
+                ? `Generating: ${genPageName}...`
+                : "Generating designs..."}
             </span>
             <span className="text-muted-foreground">
               {genProgress} / {genTotal}

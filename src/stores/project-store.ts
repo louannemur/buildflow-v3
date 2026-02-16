@@ -125,7 +125,10 @@ interface ProjectState {
   designGenProgress: number;
   designGenTotal: number;
   designGenerating: boolean;
+  designGenCurrentPageName: string | null;
+  designGenProjectId: string | null;
   generateAllDesigns: () => Promise<void>;
+  resumeDesignGeneration: () => void;
 
   // Loading
   setLoading: (loading: boolean) => void;
@@ -145,7 +148,91 @@ const initialState = {
   designGenProgress: 0,
   designGenTotal: 0,
   designGenerating: false,
+  designGenCurrentPageName: null as string | null,
+  designGenProjectId: null as string | null,
 };
+
+/* ─── Design batch runner ─────────────────────────────────────────────── */
+
+async function runDesignBatch(
+  projectId: string,
+  pages: ProjectPage[],
+  set: (partial: Partial<ProjectState>) => void,
+) {
+  set({
+    designGenerating: true,
+    designGenProgress: 0,
+    designGenTotal: pages.length,
+    designGenCurrentPageName: null,
+    designGenProjectId: projectId,
+  });
+
+  const batchKey = `design-batch-${projectId}`;
+  let completed = 0;
+
+  for (const page of pages) {
+    const current = useProjectStore.getState();
+    // Stop only if explicitly cancelled (not by navigation reset)
+    if (!current.designGenerating) break;
+
+    set({ designGenCurrentPageName: page.title });
+
+    try {
+      const res = await fetch(
+        `/api/projects/${projectId}/designs/generate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pageId: page.id }),
+        },
+      );
+
+      if (res.ok) {
+        const design = await res.json();
+        // Only add to store if user is still viewing this project
+        const s = useProjectStore.getState();
+        if (s.project?.id === projectId) {
+          s.addDesign(design);
+        }
+      }
+    } catch {
+      // Continue with remaining pages
+    }
+
+    completed++;
+    set({ designGenProgress: completed });
+
+    // Update localStorage — remove completed page
+    try {
+      const stored = localStorage.getItem(batchKey);
+      if (stored) {
+        const remaining = (JSON.parse(stored) as string[]).filter(
+          (id) => id !== page.id,
+        );
+        if (remaining.length > 0) {
+          localStorage.setItem(batchKey, JSON.stringify(remaining));
+        } else {
+          localStorage.removeItem(batchKey);
+        }
+      }
+    } catch {
+      // Non-critical
+    }
+  }
+
+  set({
+    designGenerating: false,
+    designGenCurrentPageName: null,
+    designGenProjectId: null,
+  });
+  localStorage.removeItem(batchKey);
+
+  if (completed > 0) {
+    toast.success(
+      `Generated designs for ${completed} page${completed !== 1 ? "s" : ""}.`,
+    );
+  }
+}
 
 export const useProjectStore = create<ProjectState>((set) => ({
   ...initialState,
@@ -223,6 +310,8 @@ export const useProjectStore = create<ProjectState>((set) => ({
   designGenProgress: 0,
   designGenTotal: 0,
   designGenerating: false,
+  designGenCurrentPageName: null,
+  designGenProjectId: null,
 
   generateAllDesigns: async () => {
     const state = useProjectStore.getState();
@@ -237,47 +326,68 @@ export const useProjectStore = create<ProjectState>((set) => ({
 
     if (toGenerate.length === 0) return;
 
-    set({ designGenerating: true, designGenProgress: 0, designGenTotal: toGenerate.length });
+    // Persist batch to localStorage for resumption
+    const batchKey = `design-batch-${state.project.id}`;
+    localStorage.setItem(batchKey, JSON.stringify(toGenerate.map((p) => p.id)));
 
-    let completed = 0;
+    runDesignBatch(state.project.id, toGenerate, set);
+  },
 
-    for (const page of toGenerate) {
-      // Re-check in case the store was reset (user left project)
-      const current = useProjectStore.getState();
-      if (!current.designGenerating) break;
+  resumeDesignGeneration: () => {
+    const state = useProjectStore.getState();
+    if (!state.project || state.designGenerating) return;
 
-      try {
-        const res = await fetch(
-          `/api/projects/${state.project.id}/designs/generate`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ pageId: page.id }),
-          },
-        );
+    const batchKey = `design-batch-${state.project.id}`;
+    const stored = localStorage.getItem(batchKey);
+    if (!stored) return;
 
-        if (res.ok) {
-          const design = await res.json();
-          useProjectStore.getState().addDesign(design);
-        }
-      } catch {
-        // Continue with remaining pages
-      }
-
-      completed++;
-      set({ designGenProgress: completed });
+    let pageIds: string[];
+    try {
+      pageIds = JSON.parse(stored);
+    } catch {
+      localStorage.removeItem(batchKey);
+      return;
     }
 
-    set({ designGenerating: false });
+    // Filter to pages that still need generation
+    const designedPageIds = new Set(
+      state.designs
+        .filter((d) => d.pageId && d.html.length > 0)
+        .map((d) => d.pageId),
+    );
+    const remainingIds = new Set(pageIds.filter((id) => !designedPageIds.has(id)));
+    const remaining = state.pages.filter((p) => remainingIds.has(p.id));
 
-    if (completed > 0) {
-      toast.success(`Generated designs for ${completed} page${completed !== 1 ? "s" : ""}.`);
+    if (remaining.length === 0) {
+      localStorage.removeItem(batchKey);
+      return;
     }
+
+    runDesignBatch(state.project.id, remaining, set);
   },
 
   // Loading
   setLoading: (loading) => set({ loading }),
 
-  // Reset
-  reset: () => set(initialState),
+  // Reset — preserve generation state so background batch continues
+  reset: () => {
+    const {
+      designGenerating,
+      designGenProgress,
+      designGenTotal,
+      designGenCurrentPageName,
+      designGenProjectId,
+    } = useProjectStore.getState();
+
+    set({
+      ...initialState,
+      ...(designGenerating && {
+        designGenerating,
+        designGenProgress,
+        designGenTotal,
+        designGenCurrentPageName,
+        designGenProjectId,
+      }),
+    });
+  },
 }));

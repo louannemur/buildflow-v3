@@ -150,12 +150,11 @@ export async function POST(req: Request) {
       return NextResponse.json(project, { status: 201 });
     }
 
-    // ─── Generate features ───────────────────────────────────────────────
+    // ─── Generate features (first — flows & pages benefit from the context) ─
 
     const chatContext = buildChatContext(history);
-    let userMessage = `Project: ${name}`;
-    if (description) userMessage += `\nDescription: ${description}`;
-    userMessage += `\n\nChat context (conversation between user and assistant about this project):\n${chatContext}`;
+    let baseMessage = `Project: ${name}`;
+    if (description) baseMessage += `\nDescription: ${description}`;
 
     let generatedFeatures: { title: string; description: string }[] = [];
 
@@ -164,129 +163,135 @@ export async function POST(req: Request) {
         model: "claude-sonnet-4-20250514",
         max_tokens: 1500,
         system: FEATURES_PROMPT,
-        messages: [{ role: "user", content: userMessage }],
+        messages: [
+          {
+            role: "user",
+            content: `${baseMessage}\n\nChat context (conversation between user and assistant about this project):\n${chatContext}`,
+          },
+        ],
       });
 
       const featuresText =
         featuresRes.content[0].type === "text"
           ? featuresRes.content[0].text
           : "";
-      const featuresArr = parseJsonArray(featuresText) as typeof generatedFeatures | null;
+      const featuresArr = parseJsonArray(featuresText) as
+        | typeof generatedFeatures
+        | null;
 
       if (featuresArr) {
         generatedFeatures = featuresArr;
-        await db
-          .insert(features)
-          .values(
+        await Promise.all([
+          db.insert(features).values(
             generatedFeatures.map((f, i) => ({
               projectId: project.id,
               title: f.title,
               description: f.description,
               order: i,
             })),
-          );
-        await incrementUsage(userId, "aiGenerations");
+          ),
+          incrementUsage(userId, "aiGenerations"),
+        ]);
       }
     } catch {
       // Feature generation failed — continue with empty features
     }
 
-    // ─── Generate flows ──────────────────────────────────────────────────
+    // ─── Generate flows + pages in parallel ───────────────────────────────
 
-    let generatedFlows: {
+    const featuresContext =
+      generatedFeatures.length > 0
+        ? `\n\nFeatures:\n${generatedFeatures.map((f) => `- ${f.title}: ${f.description}`).join("\n")}`
+        : "";
+
+    type FlowItem = {
       title: string;
       steps: { id: string; title: string; description: string; type: string }[];
-    }[] = [];
+    };
+    type PageItem = {
+      title: string;
+      description: string;
+      contents: { id: string; name: string; description: string }[];
+    };
 
-    try {
-      let flowsMessage = `Project: ${name}`;
-      if (description) flowsMessage += `\nDescription: ${description}`;
-      if (generatedFeatures.length > 0) {
-        flowsMessage += `\n\nFeatures:\n${generatedFeatures.map((f) => `- ${f.title}: ${f.description}`).join("\n")}`;
-      }
-      flowsMessage += `\n\nChat context:\n${chatContext}`;
+    const [flowsResult, pagesResult] = await Promise.allSettled([
+      // Flows
+      (async () => {
+        const flowsRes = await anthropic.messages.create({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 3000,
+          system: FLOWS_PROMPT,
+          messages: [
+            {
+              role: "user",
+              content: `${baseMessage}${featuresContext}\n\nChat context:\n${chatContext}`,
+            },
+          ],
+        });
+        const text =
+          flowsRes.content[0].type === "text" ? flowsRes.content[0].text : "";
+        return parseJsonArray(text) as FlowItem[] | null;
+      })(),
+      // Pages
+      (async () => {
+        const pagesRes = await anthropic.messages.create({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 4000,
+          system: PAGES_PROMPT,
+          messages: [
+            {
+              role: "user",
+              content: `${baseMessage}${featuresContext}\n\nChat context:\n${chatContext}`,
+            },
+          ],
+        });
+        const text =
+          pagesRes.content[0].type === "text" ? pagesRes.content[0].text : "";
+        return parseJsonArray(text) as PageItem[] | null;
+      })(),
+    ]);
 
-      const flowsRes = await anthropic.messages.create({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 3000,
-        system: FLOWS_PROMPT,
-        messages: [{ role: "user", content: flowsMessage }],
-      });
+    // ─── Insert flows + pages + update step in parallel ───────────────────
 
-      const flowsText =
-        flowsRes.content[0].type === "text" ? flowsRes.content[0].text : "";
-      const flowsArr = parseJsonArray(flowsText) as typeof generatedFlows | null;
+    const dbOps: Promise<unknown>[] = [];
 
-      if (flowsArr) {
-        generatedFlows = flowsArr;
-        await db
-          .insert(userFlows)
-          .values(
-            generatedFlows.map((f, i) => ({
-              projectId: project.id,
-              title: f.title,
-              steps: f.steps,
-              order: i,
-            })),
-          );
-        await incrementUsage(userId, "aiGenerations");
-      }
-    } catch {
-      // Flow generation failed — continue
+    if (flowsResult.status === "fulfilled" && flowsResult.value) {
+      dbOps.push(
+        db.insert(userFlows).values(
+          flowsResult.value.map((f, i) => ({
+            projectId: project.id,
+            title: f.title,
+            steps: f.steps,
+            order: i,
+          })),
+        ),
+        incrementUsage(userId, "aiGenerations"),
+      );
     }
 
-    // ─── Generate pages ──────────────────────────────────────────────────
-
-    try {
-      let pagesMessage = `Project: ${name}`;
-      if (description) pagesMessage += `\nDescription: ${description}`;
-      if (generatedFeatures.length > 0) {
-        pagesMessage += `\n\nFeatures:\n${generatedFeatures.map((f) => `- ${f.title}: ${f.description}`).join("\n")}`;
-      }
-      if (generatedFlows.length > 0) {
-        pagesMessage += `\n\nUser Flows:\n${generatedFlows.map((f) => `- ${f.title} (${f.steps?.length ?? 0} steps)`).join("\n")}`;
-      }
-      pagesMessage += `\n\nChat context:\n${chatContext}`;
-
-      const pagesRes = await anthropic.messages.create({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 4000,
-        system: PAGES_PROMPT,
-        messages: [{ role: "user", content: pagesMessage }],
-      });
-
-      const pagesText =
-        pagesRes.content[0].type === "text" ? pagesRes.content[0].text : "";
-      const pagesArr = parseJsonArray(pagesText) as {
-        title: string;
-        description: string;
-        contents: { id: string; name: string; description: string }[];
-      }[] | null;
-
-      if (pagesArr) {
-        await db
-          .insert(pages)
-          .values(
-            pagesArr.map((p, i) => ({
-              projectId: project.id,
-              title: p.title,
-              description: p.description,
-              contents: p.contents,
-              order: i,
-            })),
-          );
-        await incrementUsage(userId, "aiGenerations");
-      }
-    } catch {
-      // Page generation failed — continue
+    if (pagesResult.status === "fulfilled" && pagesResult.value) {
+      dbOps.push(
+        db.insert(pages).values(
+          pagesResult.value.map((p, i) => ({
+            projectId: project.id,
+            title: p.title,
+            description: p.description,
+            contents: p.contents,
+            order: i,
+          })),
+        ),
+        incrementUsage(userId, "aiGenerations"),
+      );
     }
 
-    // ─── Update currentStep to designs (past features/flows/pages) ───────
+    dbOps.push(
+      db
+        .update(projects)
+        .set({ currentStep: "designs" })
+        .where(eq(projects.id, project.id)),
+    );
 
-    await db
-      .update(projects)
-      .set({ currentStep: "designs" })
-      .where(eq(projects.id, project.id));
+    await Promise.all(dbOps);
 
     return NextResponse.json(
       { ...project, currentStep: "designs" },
