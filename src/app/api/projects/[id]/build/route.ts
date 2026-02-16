@@ -595,7 +595,7 @@ export async function POST(
           let finalFiles = completedFiles;
 
           if (parsed.data.framework !== "html") {
-            let currentFiles = [...completedFiles];
+            const currentFiles = [...completedFiles];
             let buildPassed = false;
 
             for (

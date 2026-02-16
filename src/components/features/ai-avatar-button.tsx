@@ -15,15 +15,14 @@ function isEditorRoute(pathname: string): boolean {
 
 export function AIAvatarButton() {
   const pathname = usePathname();
-
-  // Hide on /home
-  if (pathname === "/home") return null;
-
   const isEditor = isEditorRoute(pathname);
 
   const editorChatOpen = useEditorStore((s) => s.showChat);
   const globalChatOpen = useGlobalChatStore((s) => s.isOpen);
   const isOpen = isEditor ? editorChatOpen : globalChatOpen;
+
+  // Hide on /home
+  if (pathname === "/home") return null;
 
   const handleClick = () => {
     if (isEditor) {
