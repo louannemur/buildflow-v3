@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { motion } from "framer-motion";
 import {
   DndContext,
@@ -105,6 +105,22 @@ export function PagesContent() {
     removePage,
     loading,
   } = useProjectStore();
+
+  // Scroll to item from sidebar hash navigation
+  useEffect(() => {
+    const hash = window.location.hash.slice(1);
+    if (!hash || loading) return;
+    const timeout = setTimeout(() => {
+      const el = document.getElementById(hash);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("ring-2", "ring-primary", "rounded-xl");
+        setTimeout(() => el.classList.remove("ring-2", "ring-primary", "rounded-xl"), 2000);
+      }
+      window.history.replaceState(null, "", window.location.pathname);
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [loading]);
 
   // AI
   const [upgradeOpen, setUpgradeOpen] = useState(false);
@@ -441,7 +457,7 @@ export function PagesContent() {
             className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
           >
             {pages.map((page) => (
-              <motion.div key={page.id} variants={staggerItem}>
+              <motion.div key={page.id} id={page.id} variants={staggerItem}>
                 <PageCard
                   page={page}
                   onOpen={() => openDetail(page)}

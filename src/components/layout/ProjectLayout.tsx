@@ -208,11 +208,13 @@ function SidebarContent({
   activeStep,
   onStepClick,
   onOverviewClick,
+  onItemClick,
 }: {
   project: ProjectData;
   activeStep: ProjectStep | null;
   onStepClick: (step: ProjectStep) => void;
   onOverviewClick: () => void;
+  onItemClick: (step: ProjectStep, itemId: string) => void;
 }) {
   // Read live data from the store for sidebar items
   const storeProject = useProjectStore((s) => s.project);
@@ -328,12 +330,13 @@ function SidebarContent({
                     <CollapsibleContent>
                       <div className="space-y-0.5 pb-2 pl-2">
                         {items.map((item) => (
-                          <div
+                          <button
                             key={item.id}
-                            className="flex w-full items-center rounded-md px-2 py-1.5 text-xs text-muted-foreground"
+                            onClick={() => onItemClick(step.key, item.id)}
+                            className="flex w-full items-center rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
                           >
                             <span className="truncate">{item.title}</span>
-                          </div>
+                          </button>
                         ))}
                       </div>
                     </CollapsibleContent>
@@ -428,6 +431,14 @@ export function ProjectLayout({
     [setActiveStep]
   );
 
+  const handleItemClick = useCallback(
+    (step: ProjectStep, itemId: string) => {
+      router.push(`${projectBasePath}/${step}#${itemId}`);
+      setMobileOpen(false);
+    },
+    [projectBasePath, router]
+  );
+
   const handleOverviewClick = useCallback(() => {
     goToOverview();
     setMobileOpen(false);
@@ -463,6 +474,7 @@ export function ProjectLayout({
                     activeStep={activeStep}
                     onStepClick={handleStepClick}
                     onOverviewClick={handleOverviewClick}
+                    onItemClick={handleItemClick}
                   />
                 </SheetContent>
               </Sheet>
@@ -525,6 +537,7 @@ export function ProjectLayout({
                 activeStep={activeStep}
                 onStepClick={handleStepClick}
                 onOverviewClick={handleOverviewClick}
+                onItemClick={handleItemClick}
               />
             </div>
           </aside>

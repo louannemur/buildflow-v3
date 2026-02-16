@@ -81,6 +81,22 @@ export function DesignsContent() {
   } = useProjectStore();
   const router = useRouter();
 
+  // Scroll to item from sidebar hash navigation
+  useEffect(() => {
+    const hash = window.location.hash.slice(1);
+    if (!hash || loading) return;
+    const timeout = setTimeout(() => {
+      const el = document.getElementById(hash);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("ring-2", "ring-primary", "rounded-xl");
+        setTimeout(() => el.classList.remove("ring-2", "ring-primary", "rounded-xl"), 2000);
+      }
+      window.history.replaceState(null, "", window.location.pathname);
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [loading]);
+
   // Map pages to their designs
   const pageDesignMap = useMemo(() => {
     const map = new Map<string, ProjectDesign>();
@@ -266,7 +282,7 @@ export function DesignsContent() {
                   : designHtmlMap.get(design.id) ?? "")
               : "";
             return (
-              <motion.div key={page.id} variants={staggerItem}>
+              <motion.div key={page.id} id={page.id} variants={staggerItem}>
                 <DesignCard
                   page={page}
                   design={design ? { ...design, html } : null}
