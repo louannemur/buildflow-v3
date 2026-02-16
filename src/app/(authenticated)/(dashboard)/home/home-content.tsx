@@ -17,7 +17,7 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { NetworkGraph } from "@/components/features/network-graph";
 import { UpgradeModal } from "@/components/features/upgrade-modal";
 import { ProjectCard } from "@/components/features/project-card";
@@ -616,7 +616,7 @@ export function HomeContent() {
               </TabsList>
             </div>
 
-            <TabsContent value={tab} className="mt-4">
+            <div className="mt-4">
               {recentsLoading ? (
                 <div className="grid auto-rows-fr gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                   {Array.from({ length: 4 }).map((_, i) => (
@@ -658,7 +658,7 @@ export function HomeContent() {
                   )}
                 </div>
               )}
-            </TabsContent>
+            </div>
           </Tabs>
         </motion.div>
       </div>
