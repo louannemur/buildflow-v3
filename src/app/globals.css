@@ -60,7 +60,7 @@
 
 /* ─── Light theme (warm cream) ───────────────────────────────────────── */
 :root {
-  --radius: 0.625rem;
+  --radius: 0.5rem;
 
   /* Warm cream neutrals */
   --background: #F5F1EB;
