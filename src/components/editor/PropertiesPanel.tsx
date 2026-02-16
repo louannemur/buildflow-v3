@@ -1,97 +1,271 @@
 "use client";
 
 import * as React from "react";
-import { X } from "lucide-react";
+import {
+  X,
+  ChevronDown,
+  ChevronRight,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  AlignJustify,
+} from "lucide-react";
 import { useEditorStore } from "@/lib/editor/store";
 import {
+  updateElementClasses,
   addClassToElement,
   removeClassFromElement,
   updateElementText,
   updateElementAttribute,
 } from "@/lib/design/code-mutator";
 import { injectBfIds, stripBfIds } from "@/lib/design/inject-bf-ids";
+import {
+  parseTailwindClasses,
+  buildClassString,
+  swapClass,
+  twClassToHex,
+  hexToTwClass,
+  extractPaddingValue,
+  FONT_WEIGHTS,
+  FONT_SIZES,
+  SHADOW_OPTIONS,
+  type ParsedStyles,
+} from "@/lib/design/tailwind-parser";
+
+/* ─── Props ──────────────────────────────────────────────────────────── */
 
 interface PropertiesPanelProps {
   designCode: string;
   onCodeChange: (newCode: string) => void;
 }
 
-// Simple Tailwind class categorization
-function categorizeClasses(classStr: string): Record<string, string[]> {
-  const classes = classStr.split(/\s+/).filter(Boolean);
-  const categories: Record<string, string[]> = {
-    layout: [],
-    spacing: [],
-    sizing: [],
-    typography: [],
-    colors: [],
-    borders: [],
-    effects: [],
-    other: [],
-  };
+/* ─── Small reusable components ──────────────────────────────────────── */
 
-  for (const cls of classes) {
-    if (/^(flex|grid|block|inline|hidden|relative|absolute|fixed|sticky|float|clear|overflow|z-)/.test(cls) || /^(items-|justify-|gap-|order-|col-|row-)/.test(cls)) {
-      categories.layout.push(cls);
-    } else if (/^(p[xytblr]?-|m[xytblr]?-|space-)/.test(cls)) {
-      categories.spacing.push(cls);
-    } else if (/^(w-|h-|min-|max-|size-)/.test(cls)) {
-      categories.sizing.push(cls);
-    } else if (/^(text-(?:xs|sm|base|lg|xl|2xl|3xl|4xl|5xl|6xl|7xl|8xl|9xl)|font-|leading-|tracking-|whitespace-|break-|truncate|uppercase|lowercase|capitalize|italic|not-italic|underline|overline|line-through|no-underline|antialiased)/.test(cls)) {
-      categories.typography.push(cls);
-    } else if (/^(bg-|text-(?!xs|sm|base|lg|xl)|from-|via-|to-|decoration-|accent-|caret-|fill-|stroke-|placeholder-)/.test(cls)) {
-      categories.colors.push(cls);
-    } else if (/^(border|rounded|ring|outline|divide|shadow)/.test(cls)) {
-      categories.borders.push(cls);
-    } else if (/^(opacity-|backdrop-|blur|brightness|contrast|drop-shadow|grayscale|hue-rotate|invert|saturate|sepia|transition|duration|ease|delay|animate|scale|rotate|translate|skew|transform|cursor|pointer-events|select|resize|scroll|snap|touch|will-change)/.test(cls)) {
-      categories.effects.push(cls);
-    } else {
-      categories.other.push(cls);
-    }
-  }
+function PropInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  readOnly,
+  className,
+}: {
+  label: string;
+  value: string;
+  onChange?: (value: string) => void;
+  placeholder?: string;
+  readOnly?: boolean;
+  className?: string;
+}) {
+  const [local, setLocal] = React.useState(value);
+  React.useEffect(() => setLocal(value), [value]);
 
-  return categories;
+  return (
+    <div className={className}>
+      <label className="mb-0.5 block text-[10px] text-muted-foreground">
+        {label}
+      </label>
+      <input
+        type="text"
+        className="h-7 w-full rounded border border-border/60 bg-muted/30 px-2 text-xs text-foreground focus:border-primary/50 focus:outline-none disabled:opacity-50"
+        value={local}
+        onChange={(e) => setLocal(e.target.value)}
+        onBlur={() => {
+          if (onChange && local !== value) onChange(local);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && onChange) {
+            onChange(local);
+            (e.target as HTMLInputElement).blur();
+          }
+          if (e.key === "Escape") {
+            setLocal(value);
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+        placeholder={placeholder}
+        readOnly={readOnly}
+        disabled={readOnly}
+      />
+    </div>
+  );
 }
 
-const CATEGORY_LABELS: Record<string, string> = {
-  layout: "Layout",
-  spacing: "Spacing",
-  sizing: "Sizing",
-  typography: "Typography",
-  colors: "Colors",
-  borders: "Borders & Shadows",
-  effects: "Effects & Transitions",
-  other: "Other",
-};
+function ColorInput({
+  label,
+  hex,
+  onChange,
+}: {
+  label?: string;
+  hex: string | null;
+  onChange: (hex: string) => void;
+}) {
+  const colorRef = React.useRef<HTMLInputElement>(null);
+  const displayHex = hex || "";
+  const [localHex, setLocalHex] = React.useState(displayHex);
+  React.useEffect(() => setLocalHex(hex || ""), [hex]);
 
-export function PropertiesPanel({ designCode, onCodeChange }: PropertiesPanelProps) {
-  const { selectedElement, selectedBfId, setSelectedBfId, toggleProperties } = useEditorStore();
+  return (
+    <div className="flex-1">
+      {label && (
+        <label className="mb-0.5 block text-[10px] text-muted-foreground">
+          {label}
+        </label>
+      )}
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          className="size-7 shrink-0 rounded border border-border/60"
+          style={{ backgroundColor: hex || "transparent" }}
+          onClick={() => colorRef.current?.click()}
+        />
+        <input
+          ref={colorRef}
+          type="color"
+          className="invisible absolute size-0"
+          value={hex || "#000000"}
+          onChange={(e) => {
+            setLocalHex(e.target.value);
+            onChange(e.target.value);
+          }}
+        />
+        <input
+          type="text"
+          className="h-7 w-full min-w-0 rounded border border-border/60 bg-muted/30 px-2 text-xs uppercase text-foreground focus:border-primary/50 focus:outline-none"
+          value={localHex.replace("#", "")}
+          onChange={(e) => {
+            const v = e.target.value.replace(/[^0-9a-fA-F]/g, "").slice(0, 6);
+            setLocalHex(`#${v}`);
+          }}
+          onBlur={() => {
+            if (localHex.length >= 4) onChange(localHex);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && localHex.length >= 4) {
+              onChange(localHex);
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+          placeholder="hex"
+        />
+      </div>
+    </div>
+  );
+}
 
-  const [addClassCategory, setAddClassCategory] = React.useState<string | null>(null);
-  const [addClassValue, setAddClassValue] = React.useState("");
+function Section({
+  title,
+  children,
+  defaultOpen = true,
+  action,
+}: {
+  title: string;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+  action?: React.ReactNode;
+}) {
+  const [open, setOpen] = React.useState(defaultOpen);
+
+  return (
+    <div className="border-b border-border/40">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+        onClick={() => setOpen(!open)}
+      >
+        <span className="flex items-center gap-1">
+          {open ? (
+            <ChevronDown className="size-3" />
+          ) : (
+            <ChevronRight className="size-3" />
+          )}
+          {title}
+        </span>
+        {action && (
+          <span onClick={(e) => e.stopPropagation()}>{action}</span>
+        )}
+      </button>
+      {open && <div className="px-3 pb-3">{children}</div>}
+    </div>
+  );
+}
+
+function SelectInput({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: { label: string; value: string }[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div>
+      <label className="mb-0.5 block text-[10px] text-muted-foreground">
+        {label}
+      </label>
+      <select
+        className="h-7 w-full appearance-none rounded border border-border/60 bg-muted/30 px-2 text-xs text-foreground focus:border-primary/50 focus:outline-none"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+/* ─── Main component ─────────────────────────────────────────────────── */
+
+export function PropertiesPanel({
+  designCode,
+  onCodeChange,
+}: PropertiesPanelProps) {
+  const {
+    selectedElement,
+    selectedBfId,
+    setSelectedBfId,
+    toggleProperties,
+  } = useEditorStore();
+
+  // Text editing state
   const [editingText, setEditingText] = React.useState(false);
   const [textValue, setTextValue] = React.useState("");
   const [editingAlt, setEditingAlt] = React.useState(false);
   const [altValue, setAltValue] = React.useState("");
-  const addClassInputRef = React.useRef<HTMLInputElement>(null);
 
-  const selectedClasses = selectedElement?.classes;
-  const categorized = React.useMemo(() => {
-    if (!selectedClasses) return null;
-    return categorizeClasses(selectedClasses);
-  }, [selectedClasses]);
+  // Advanced classes
+  const [addingClass, setAddingClass] = React.useState(false);
+  const [newClassValue, setNewClassValue] = React.useState("");
+  const addClassRef = React.useRef<HTMLInputElement>(null);
 
+  // Sync text values on selection change
   React.useEffect(() => {
     setEditingText(false);
-    setAddClassCategory(null);
-    if (selectedElement?.textContent) setTextValue(selectedElement.textContent);
     setEditingAlt(false);
-    if (selectedElement?.attributes?.alt) setAltValue(selectedElement.attributes.alt);
-  }, [selectedBfId, selectedElement?.textContent, selectedElement?.attributes?.alt]);
+    if (selectedElement?.textContent) setTextValue(selectedElement.textContent);
+    if (selectedElement?.attributes?.alt)
+      setAltValue(selectedElement.attributes.alt);
+  }, [
+    selectedBfId,
+    selectedElement?.textContent,
+    selectedElement?.attributes?.alt,
+  ]);
 
   React.useEffect(() => {
-    if (addClassCategory && addClassInputRef.current) addClassInputRef.current.focus();
-  }, [addClassCategory]);
+    if (addingClass && addClassRef.current) addClassRef.current.focus();
+  }, [addingClass]);
+
+  // Parse classes
+  const parsed = React.useMemo<ParsedStyles | null>(() => {
+    if (!selectedElement?.classes) return null;
+    return parseTailwindClasses(selectedElement.classes);
+  }, [selectedElement?.classes]);
 
   if (!selectedElement) {
     return (
@@ -100,18 +274,46 @@ export function PropertiesPanel({ designCode, onCodeChange }: PropertiesPanelPro
           <h3 className="text-xs font-semibold">Properties</h3>
         </div>
         <div className="flex flex-1 items-center justify-center">
-          <p className="text-xs text-muted-foreground">Select an element to edit</p>
+          <p className="text-xs text-muted-foreground">
+            Select an element to edit
+          </p>
         </div>
       </div>
     );
   }
 
-  // Mutate code through inject -> mutate -> strip pipeline
+  // ─── Mutation helpers ───────────────────────────────────────────
+
   const mutateAndSave = (mutator: (annotated: string) => string) => {
     const { annotatedCode } = injectBfIds(designCode);
     const updated = mutator(annotatedCode);
     const clean = stripBfIds(updated);
     if (clean !== designCode) onCodeChange(clean);
+  };
+
+  /** Replace a single class with a new value (or add/remove) */
+  const handleSwapClass = (
+    oldClass: string | null,
+    newClass: string | null,
+  ) => {
+    if (!selectedBfId || !selectedElement.classes) return;
+    const updated = swapClass(selectedElement.classes, oldClass, newClass);
+    if (updated !== selectedElement.classes) {
+      mutateAndSave((code) =>
+        updateElementClasses(code, selectedBfId, updated),
+      );
+    }
+  };
+
+  /** Replace entire class string from a parsed object */
+  const handleUpdateFromParsed = (newParsed: ParsedStyles) => {
+    if (!selectedBfId) return;
+    const newClasses = buildClassString(newParsed);
+    if (newClasses !== selectedElement.classes) {
+      mutateAndSave((code) =>
+        updateElementClasses(code, selectedBfId, newClasses),
+      );
+    }
   };
 
   const handleRemoveClass = (cls: string) => {
@@ -120,171 +322,644 @@ export function PropertiesPanel({ designCode, onCodeChange }: PropertiesPanelPro
   };
 
   const handleAddClass = () => {
-    if (!selectedBfId || !addClassValue.trim()) return;
-    const classesToAdd = addClassValue.trim().split(/\s+/);
+    if (!selectedBfId || !newClassValue.trim()) return;
+    const classesToAdd = newClassValue.trim().split(/\s+/);
     mutateAndSave((code) => {
       let result = code;
-      for (const cls of classesToAdd) result = addClassToElement(result, selectedBfId, cls);
+      for (const cls of classesToAdd)
+        result = addClassToElement(result, selectedBfId, cls);
       return result;
     });
-    setAddClassValue("");
-    setAddClassCategory(null);
+    setNewClassValue("");
+    setAddingClass(false);
   };
 
   const handleTextChange = () => {
-    if (!selectedBfId || textValue === selectedElement.textContent) { setEditingText(false); return; }
+    if (!selectedBfId || textValue === selectedElement.textContent) {
+      setEditingText(false);
+      return;
+    }
     mutateAndSave((code) => updateElementText(code, selectedBfId, textValue));
     setEditingText(false);
   };
 
   const handleAltChange = () => {
-    if (!selectedBfId) { setEditingAlt(false); return; }
+    if (!selectedBfId) {
+      setEditingAlt(false);
+      return;
+    }
     const currentAlt = selectedElement.attributes?.alt || "";
-    if (altValue === currentAlt) { setEditingAlt(false); return; }
-    mutateAndSave((code) => updateElementAttribute(code, selectedBfId, "alt", altValue));
+    if (altValue === currentAlt) {
+      setEditingAlt(false);
+      return;
+    }
+    mutateAndSave((code) =>
+      updateElementAttribute(code, selectedBfId, "alt", altValue),
+    );
     setEditingAlt(false);
   };
 
-  const categories = categorized ? Object.keys(categorized).filter((cat) => categorized[cat].length > 0) : [];
-  const emptyCategories = categorized ? Object.keys(categorized).filter((cat) => categorized[cat].length === 0 && cat !== "other") : [];
+  // ─── Derived values ────────────────────────────────────────────
+
   const isImageElement = selectedElement.tag === "img";
   const currentAlt = selectedElement.attributes?.alt || "";
+  const rect = selectedElement.rect;
+
+  // Colors
+  const bgHex = parsed?.bgColor ? twClassToHex(parsed.bgColor) : null;
+  const textHex = parsed?.textColor ? twClassToHex(parsed.textColor) : null;
+  const borderHex = parsed?.borderColor
+    ? twClassToHex(parsed.borderColor)
+    : null;
+
+  // Font weight display value
+  const fontWeightValue = parsed?.fontWeight
+    ? parsed.fontWeight.replace("font-", "")
+    : "normal";
+
+  // Font size display value
+  const fontSizeValue = parsed?.fontSize
+    ? parsed.fontSize.replace("text-", "")
+    : "";
+
+  // Shadow display value
+  const shadowValue = parsed?.shadow
+    ? parsed.shadow === "shadow"
+      ? ""
+      : parsed.shadow.replace("shadow-", "")
+    : "none";
+
+  // Text align value
+  const textAlignValue = parsed?.textAlign
+    ? parsed.textAlign.replace("text-", "")
+    : "";
+
+  // Border radius display
+  const borderRadiusValue = parsed?.borderRadius
+    ? parsed.borderRadius === "rounded"
+      ? "default"
+      : parsed.borderRadius.replace("rounded-", "")
+    : "";
+
+  // Opacity display
+  const opacityValue = parsed?.opacity
+    ? parsed.opacity.replace("opacity-", "")
+    : "100";
 
   return (
     <div className="flex h-full flex-col">
+      {/* ── Header ──────────────────────────────────────────────── */}
       <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
-        <h3 className="text-xs font-semibold">Properties</h3>
-        <div className="flex items-center gap-1.5">
-          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{selectedElement.tag}</span>
-          <button
-            onClick={() => { setSelectedBfId(null); toggleProperties(); }}
-            className="flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <X className="size-3" />
-          </button>
+        <div className="flex items-center gap-2">
+          <h3 className="text-xs font-semibold capitalize">
+            {selectedElement.tag}
+          </h3>
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+            &lt;{selectedElement.tag}&gt;
+          </span>
         </div>
+        <button
+          onClick={() => {
+            setSelectedBfId(null);
+            toggleProperties();
+          }}
+          className="flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <X className="size-3" />
+        </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 space-y-4">
-        {/* Element info */}
-        <div>
-          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Element</label>
-          <div className="text-xs text-foreground">&lt;{selectedElement.tag}&gt;</div>
-        </div>
-
-        {/* Image section */}
-        {isImageElement && (
-          <div>
-            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Alt Text</label>
-            {editingAlt ? (
-              <input
-                type="text"
-                className="w-full rounded border border-border/60 bg-muted/30 px-2 py-1 text-xs focus:border-primary/40 focus:outline-none"
-                value={altValue}
-                onChange={(e) => setAltValue(e.target.value)}
-                onBlur={handleAltChange}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") { e.preventDefault(); handleAltChange(); }
-                  if (e.key === "Escape") { setAltValue(currentAlt); setEditingAlt(false); }
-                }}
-                autoFocus
-              />
-            ) : (
-              <div className="cursor-pointer rounded bg-muted/30 px-2 py-1 text-xs hover:bg-muted transition-colors" onClick={() => { setAltValue(currentAlt); setEditingAlt(true); }}>
-                {currentAlt || "(no alt text)"}
-              </div>
-            )}
+      <div className="flex-1 overflow-y-auto">
+        {/* ── Size & Position ───────────────────────────────────── */}
+        <Section title="Size & Position">
+          <div className="grid grid-cols-2 gap-2">
+            <PropInput
+              label="X Position"
+              value={Math.round(rect.left).toString()}
+              readOnly
+            />
+            <PropInput
+              label="Y Position"
+              value={Math.round(rect.top).toString()}
+              readOnly
+            />
           </div>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <PropInput
+              label="Width (px)"
+              value={Math.round(rect.width).toString()}
+              readOnly
+            />
+            <PropInput
+              label="Height (px)"
+              value={Math.round(rect.height).toString()}
+              readOnly
+            />
+          </div>
+          {(parsed?.width || parsed?.height || parsed?.maxWidth || parsed?.maxHeight) && (
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {parsed?.width && (
+                <PropInput
+                  label="Width"
+                  value={parsed.width.replace("w-", "")}
+                  onChange={(v) =>
+                    handleSwapClass(parsed.width, v ? `w-${v}` : null)
+                  }
+                />
+              )}
+              {parsed?.height && (
+                <PropInput
+                  label="Height"
+                  value={parsed.height.replace("h-", "")}
+                  onChange={(v) =>
+                    handleSwapClass(parsed.height, v ? `h-${v}` : null)
+                  }
+                />
+              )}
+              {parsed?.maxWidth && (
+                <PropInput
+                  label="Max Width"
+                  value={parsed.maxWidth.replace("max-w-", "")}
+                  onChange={(v) =>
+                    handleSwapClass(parsed.maxWidth, v ? `max-w-${v}` : null)
+                  }
+                />
+              )}
+              {parsed?.maxHeight && (
+                <PropInput
+                  label="Max Height"
+                  value={parsed.maxHeight.replace("max-h-", "")}
+                  onChange={(v) =>
+                    handleSwapClass(
+                      parsed.maxHeight,
+                      v ? `max-h-${v}` : null,
+                    )
+                  }
+                />
+              )}
+            </div>
+          )}
+        </Section>
+
+        {/* ── Padding ───────────────────────────────────────────── */}
+        <Section title="Padding">
+          <div className="grid grid-cols-4 gap-2">
+            <PropInput
+              label="Top"
+              value={extractPaddingValue(parsed?.paddingTop ?? null)}
+              placeholder="0"
+              onChange={(v) => {
+                const old = parsed?.paddingTop ?? null;
+                handleSwapClass(old, v ? `pt-${v}` : null);
+              }}
+            />
+            <PropInput
+              label="Right"
+              value={extractPaddingValue(parsed?.paddingRight ?? null)}
+              placeholder="0"
+              onChange={(v) => {
+                const old = parsed?.paddingRight ?? null;
+                handleSwapClass(old, v ? `pr-${v}` : null);
+              }}
+            />
+            <PropInput
+              label="Bottom"
+              value={extractPaddingValue(parsed?.paddingBottom ?? null)}
+              placeholder="0"
+              onChange={(v) => {
+                const old = parsed?.paddingBottom ?? null;
+                handleSwapClass(old, v ? `pb-${v}` : null);
+              }}
+            />
+            <PropInput
+              label="Left"
+              value={extractPaddingValue(parsed?.paddingLeft ?? null)}
+              placeholder="0"
+              onChange={(v) => {
+                const old = parsed?.paddingLeft ?? null;
+                handleSwapClass(old, v ? `pl-${v}` : null);
+              }}
+            />
+          </div>
+        </Section>
+
+        {/* ── Fill ──────────────────────────────────────────────── */}
+        <Section title="Fill">
+          <ColorInput
+            hex={bgHex}
+            onChange={(hex) => {
+              const newClass = hexToTwClass(hex, "bg");
+              handleSwapClass(parsed?.bgColor ?? null, newClass);
+            }}
+          />
+        </Section>
+
+        {/* ── Stroke ────────────────────────────────────────────── */}
+        <Section title="Stroke">
+          <div className="space-y-2">
+            <ColorInput
+              hex={borderHex}
+              onChange={(hex) => {
+                const newClass = hexToTwClass(hex, "border");
+                handleSwapClass(parsed?.borderColor ?? null, newClass);
+                // Ensure border width exists
+                if (!parsed?.borderWidth) {
+                  handleSwapClass(null, "border");
+                }
+              }}
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <PropInput
+                label="Width"
+                value={
+                  parsed?.borderWidth === "border"
+                    ? "1"
+                    : parsed?.borderWidth?.replace("border-", "") || "0"
+                }
+                onChange={(v) => {
+                  const old = parsed?.borderWidth ?? null;
+                  if (v === "0" || v === "") {
+                    handleSwapClass(old, null);
+                  } else if (v === "1") {
+                    handleSwapClass(old, "border");
+                  } else {
+                    handleSwapClass(old, `border-${v}`);
+                  }
+                }}
+              />
+              <PropInput
+                label="Radius"
+                value={borderRadiusValue}
+                placeholder="none"
+                onChange={(v) => {
+                  const old = parsed?.borderRadius ?? null;
+                  if (!v || v === "none") {
+                    handleSwapClass(old, null);
+                  } else if (v === "default") {
+                    handleSwapClass(old, "rounded");
+                  } else {
+                    handleSwapClass(old, `rounded-${v}`);
+                  }
+                }}
+              />
+            </div>
+          </div>
+        </Section>
+
+        {/* ── Appearance ────────────────────────────────────────── */}
+        <Section title="Appearance">
+          <div className="grid grid-cols-2 gap-2">
+            <PropInput
+              label="Opacity (%)"
+              value={opacityValue}
+              onChange={(v) => {
+                const old = parsed?.opacity ?? null;
+                if (!v || v === "100") {
+                  handleSwapClass(old, null);
+                } else {
+                  handleSwapClass(old, `opacity-${v}`);
+                }
+              }}
+            />
+            <PropInput
+              label="Corner Radius"
+              value={borderRadiusValue}
+              placeholder="none"
+              onChange={(v) => {
+                const old = parsed?.borderRadius ?? null;
+                if (!v || v === "none") {
+                  handleSwapClass(old, null);
+                } else if (v === "default") {
+                  handleSwapClass(old, "rounded");
+                } else {
+                  handleSwapClass(old, `rounded-${v}`);
+                }
+              }}
+            />
+          </div>
+        </Section>
+
+        {/* ── Typography ────────────────────────────────────────── */}
+        <Section title="Typography">
+          <div className="space-y-2">
+            {/* Text Color */}
+            <ColorInput
+              label="Color"
+              hex={textHex}
+              onChange={(hex) => {
+                const newClass = hexToTwClass(hex, "text");
+                handleSwapClass(parsed?.textColor ?? null, newClass);
+              }}
+            />
+
+            {/* Font Family */}
+            {parsed?.fontFamily && (
+              <PropInput
+                label="Font"
+                value={parsed.fontFamily
+                  .replace("font-", "")
+                  .replace(/^\['/, "")
+                  .replace(/'\]$/, "")
+                  .replace(/_/g, " ")}
+                onChange={(v) => {
+                  const old = parsed.fontFamily;
+                  if (
+                    v === "sans" ||
+                    v === "serif" ||
+                    v === "mono"
+                  ) {
+                    handleSwapClass(old, `font-${v}`);
+                  } else if (v) {
+                    handleSwapClass(
+                      old,
+                      `font-['${v.replace(/ /g, "_")}']`,
+                    );
+                  }
+                }}
+              />
+            )}
+
+            {/* Weight & Size */}
+            <div className="grid grid-cols-2 gap-2">
+              <SelectInput
+                label="Weight"
+                value={fontWeightValue}
+                options={FONT_WEIGHTS.map((w) => ({
+                  label: w.label,
+                  value: w.value,
+                }))}
+                onChange={(v) => {
+                  handleSwapClass(
+                    parsed?.fontWeight ?? null,
+                    `font-${v}`,
+                  );
+                }}
+              />
+              <SelectInput
+                label="Size"
+                value={fontSizeValue}
+                options={[
+                  { label: "—", value: "" },
+                  ...FONT_SIZES.map((s) => ({ label: s, value: s })),
+                ]}
+                onChange={(v) => {
+                  if (!v) {
+                    handleSwapClass(parsed?.fontSize ?? null, null);
+                  } else {
+                    handleSwapClass(
+                      parsed?.fontSize ?? null,
+                      `text-${v}`,
+                    );
+                  }
+                }}
+              />
+            </div>
+
+            {/* Line Height & Letter Spacing */}
+            <div className="grid grid-cols-2 gap-2">
+              <PropInput
+                label="Line H"
+                value={
+                  parsed?.lineHeight
+                    ? parsed.lineHeight.replace("leading-", "")
+                    : ""
+                }
+                placeholder="auto"
+                onChange={(v) => {
+                  handleSwapClass(
+                    parsed?.lineHeight ?? null,
+                    v ? `leading-${v}` : null,
+                  );
+                }}
+              />
+              <PropInput
+                label="Letter Sp"
+                value={
+                  parsed?.letterSpacing
+                    ? parsed.letterSpacing.replace("tracking-", "")
+                    : ""
+                }
+                placeholder="normal"
+                onChange={(v) => {
+                  handleSwapClass(
+                    parsed?.letterSpacing ?? null,
+                    v ? `tracking-${v}` : null,
+                  );
+                }}
+              />
+            </div>
+
+            {/* Alignment */}
+            <div>
+              <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                Alignment
+              </label>
+              <div className="flex gap-0.5">
+                {[
+                  { value: "left", icon: AlignLeft },
+                  { value: "center", icon: AlignCenter },
+                  { value: "right", icon: AlignRight },
+                  { value: "justify", icon: AlignJustify },
+                ].map(({ value, icon: Icon }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`flex size-7 items-center justify-center rounded transition-colors ${
+                      textAlignValue === value
+                        ? "bg-primary/10 text-primary"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    }`}
+                    onClick={() => {
+                      if (textAlignValue === value) {
+                        handleSwapClass(parsed?.textAlign ?? null, null);
+                      } else {
+                        handleSwapClass(
+                          parsed?.textAlign ?? null,
+                          `text-${value}`,
+                        );
+                      }
+                    }}
+                  >
+                    <Icon className="size-3.5" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Section>
+
+        {/* ── Effects ───────────────────────────────────────────── */}
+        <Section title="Effects">
+          <SelectInput
+            label="Drop Shadow"
+            value={shadowValue}
+            options={SHADOW_OPTIONS}
+            onChange={(v) => {
+              const old = parsed?.shadow ?? null;
+              if (v === "none") {
+                handleSwapClass(old, null);
+              } else if (v === "") {
+                handleSwapClass(old, "shadow");
+              } else {
+                handleSwapClass(old, `shadow-${v}`);
+              }
+            }}
+          />
+        </Section>
+
+        {/* ── Text Content ──────────────────────────────────────── */}
+        {(selectedElement.textContent || isImageElement) && (
+          <Section title="Content">
+            <div className="space-y-2">
+              {/* Alt Text for images */}
+              {isImageElement && (
+                <div>
+                  <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                    Alt Text
+                  </label>
+                  {editingAlt ? (
+                    <input
+                      type="text"
+                      className="h-7 w-full rounded border border-border/60 bg-muted/30 px-2 text-xs focus:border-primary/50 focus:outline-none"
+                      value={altValue}
+                      onChange={(e) => setAltValue(e.target.value)}
+                      onBlur={handleAltChange}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleAltChange();
+                        }
+                        if (e.key === "Escape") {
+                          setAltValue(currentAlt);
+                          setEditingAlt(false);
+                        }
+                      }}
+                      autoFocus
+                    />
+                  ) : (
+                    <div
+                      className="cursor-pointer rounded bg-muted/30 px-2 py-1 text-xs transition-colors hover:bg-muted"
+                      onClick={() => {
+                        setAltValue(currentAlt);
+                        setEditingAlt(true);
+                      }}
+                    >
+                      {currentAlt || "(no alt text)"}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Text Content */}
+              {selectedElement.textContent && (
+                <div>
+                  <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                    Text
+                  </label>
+                  {editingText ? (
+                    <textarea
+                      className="w-full rounded border border-border/60 bg-muted/30 px-2 py-1 text-xs focus:border-primary/50 focus:outline-none resize-none"
+                      value={textValue}
+                      onChange={(e) => setTextValue(e.target.value)}
+                      onBlur={handleTextChange}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          handleTextChange();
+                        }
+                        if (e.key === "Escape") {
+                          setTextValue(selectedElement.textContent);
+                          setEditingText(false);
+                        }
+                      }}
+                      rows={3}
+                      autoFocus
+                    />
+                  ) : (
+                    <div
+                      className="cursor-pointer rounded bg-muted/30 px-2 py-1 text-xs transition-colors hover:bg-muted line-clamp-3"
+                      onClick={() => {
+                        setTextValue(selectedElement.textContent);
+                        setEditingText(true);
+                      }}
+                    >
+                      {selectedElement.textContent}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </Section>
         )}
 
-        {/* Text content */}
-        {selectedElement.textContent && (
-          <div>
-            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Text Content</label>
-            {editingText ? (
-              <textarea
-                className="w-full rounded border border-border/60 bg-muted/30 px-2 py-1 text-xs focus:border-primary/40 focus:outline-none resize-none"
-                value={textValue}
-                onChange={(e) => setTextValue(e.target.value)}
-                onBlur={handleTextChange}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleTextChange(); }
-                  if (e.key === "Escape") { setTextValue(selectedElement.textContent); setEditingText(false); }
-                }}
-                rows={3}
-                autoFocus
-              />
-            ) : (
-              <div className="cursor-pointer rounded bg-muted/30 px-2 py-1 text-xs hover:bg-muted transition-colors" onClick={() => { setTextValue(selectedElement.textContent); setEditingText(true); }}>
-                {selectedElement.textContent}
+        {/* ── Advanced / Raw Classes ────────────────────────────── */}
+        {parsed && parsed.other.length > 0 && (
+          <Section title="Classes" defaultOpen={false}>
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-1">
+                {parsed.other.map((cls) => (
+                  <span
+                    key={cls}
+                    className="inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-[10px]"
+                  >
+                    <span>{cls}</span>
+                    <button
+                      className="ml-0.5 text-muted-foreground hover:text-foreground"
+                      onClick={() => handleRemoveClass(cls)}
+                    >
+                      &times;
+                    </button>
+                  </span>
+                ))}
               </div>
-            )}
-          </div>
-        )}
-
-        {/* Class categories */}
-        {categories.map((category) => (
-          <div key={category}>
-            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{CATEGORY_LABELS[category]}</label>
-            <div className="flex flex-wrap gap-1">
-              {categorized![category].map((cls) => (
-                <span key={cls} className="inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-[10px]">
-                  <span>{cls}</span>
-                  <button className="ml-0.5 text-muted-foreground hover:text-foreground" onClick={() => handleRemoveClass(cls)}>&times;</button>
-                </span>
-              ))}
-              {addClassCategory === category ? (
-                <form onSubmit={(e) => { e.preventDefault(); handleAddClass(); }} className="inline-flex">
+              {addingClass ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleAddClass();
+                  }}
+                >
                   <input
-                    ref={addClassInputRef}
+                    ref={addClassRef}
                     type="text"
-                    className="w-24 rounded border border-primary/40 bg-transparent px-1.5 py-0.5 text-[10px] focus:outline-none"
-                    placeholder="e.g. flex-col"
-                    value={addClassValue}
-                    onChange={(e) => setAddClassValue(e.target.value)}
-                    onBlur={() => { if (!addClassValue.trim()) setAddClassCategory(null); }}
-                    onKeyDown={(e) => { if (e.key === "Escape") { setAddClassCategory(null); setAddClassValue(""); } }}
+                    className="w-full rounded border border-primary/40 bg-transparent px-2 py-1 text-[10px] focus:outline-none"
+                    placeholder="Add class..."
+                    value={newClassValue}
+                    onChange={(e) => setNewClassValue(e.target.value)}
+                    onBlur={() => {
+                      if (!newClassValue.trim()) setAddingClass(false);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        setAddingClass(false);
+                        setNewClassValue("");
+                      }
+                    }}
                   />
                 </form>
               ) : (
-                <button className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors" onClick={() => { setAddClassCategory(category); setAddClassValue(""); }}>+</button>
+                <button
+                  className="rounded bg-muted px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+                  onClick={() => {
+                    setAddingClass(true);
+                    setNewClassValue("");
+                  }}
+                >
+                  + Add Class
+                </button>
               )}
             </div>
-          </div>
-        ))}
-
-        {/* Empty categories */}
-        {emptyCategories.length > 0 && (
-          <div>
-            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Add Classes</label>
-            <div className="flex flex-wrap gap-1">
-              {emptyCategories.map((cat) => (
-                <button key={cat} className="rounded bg-muted px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors" onClick={() => { setAddClassCategory(cat); setAddClassValue(""); }}>
-                  + {CATEGORY_LABELS[cat]}
-                </button>
-              ))}
-            </div>
-            {addClassCategory && emptyCategories.includes(addClassCategory) && (
-              <form onSubmit={(e) => { e.preventDefault(); handleAddClass(); }} className="mt-1.5">
-                <input
-                  ref={addClassInputRef}
-                  type="text"
-                  className="w-full rounded border border-primary/40 bg-transparent px-2 py-1 text-[10px] focus:outline-none"
-                  placeholder={`Add ${CATEGORY_LABELS[addClassCategory].toLowerCase()} class...`}
-                  value={addClassValue}
-                  onChange={(e) => setAddClassValue(e.target.value)}
-                  onBlur={() => { if (!addClassValue.trim()) setAddClassCategory(null); }}
-                  onKeyDown={(e) => { if (e.key === "Escape") { setAddClassCategory(null); setAddClassValue(""); } }}
-                />
-              </form>
-            )}
-          </div>
+          </Section>
         )}
 
-        {/* bf-id */}
-        <div>
-          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">ID</label>
-          <div className="text-[10px] font-mono text-muted-foreground">{selectedElement.bfId}</div>
+        {/* ── Element ID ────────────────────────────────────────── */}
+        <div className="border-b border-border/40 px-3 py-2">
+          <label className="block text-[10px] text-muted-foreground">
+            ID
+          </label>
+          <div className="text-[10px] font-mono text-muted-foreground">
+            {selectedElement.bfId}
+          </div>
         </div>
       </div>
     </div>

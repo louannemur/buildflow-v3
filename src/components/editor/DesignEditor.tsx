@@ -528,7 +528,7 @@ export function DesignEditor({
 
         {/* Right: Properties panel (design mode, toggled) */}
         {mode === "design" && showProperties && (
-          <div className="w-64 shrink-0 border-l border-border/60 bg-background">
+          <div className="w-72 shrink-0 border-l border-border/60 bg-background">
             <PropertiesPanel
               designCode={source}
               onCodeChange={handlePropertiesCodeChange}

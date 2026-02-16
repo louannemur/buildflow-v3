@@ -24,7 +24,7 @@ export interface StyleTokens {
 }
 
 // ── Tailwind color name → hex mapping (common values) ──────────────
-const TW_COLORS: Record<string, string> = {
+export const TW_COLORS: Record<string, string> = {
   'black': '#000000',
   'white': '#ffffff',
   'slate-50': '#f8fafc', 'slate-100': '#f1f5f9', 'slate-200': '#e2e8f0', 'slate-300': '#cbd5e1',
