@@ -31,6 +31,18 @@ import {
   type ParsedStyles,
 } from "@/lib/design/tailwind-parser";
 
+/* ─── Helpers ────────────────────────────────────────────────────────── */
+
+/** Convert "rgb(r, g, b)" or "rgba(r, g, b, a)" to "#rrggbb" */
+function rgbToHex(rgb: string): string | null {
+  const match = rgb.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  if (!match) return null;
+  const r = parseInt(match[1]).toString(16).padStart(2, "0");
+  const g = parseInt(match[2]).toString(16).padStart(2, "0");
+  const b = parseInt(match[3]).toString(16).padStart(2, "0");
+  return `#${r}${g}${b}`;
+}
+
 /* ─── Props ──────────────────────────────────────────────────────────── */
 
 interface PropertiesPanelProps {
@@ -354,12 +366,24 @@ export function PropertiesPanel({
   const currentAlt = selectedElement.attributes?.alt || "";
   const rect = selectedElement.rect;
 
-  // Colors
-  const bgHex = parsed?.bgColor ? twClassToHex(parsed.bgColor) : null;
-  const textHex = parsed?.textColor ? twClassToHex(parsed.textColor) : null;
+  // Colors — from Tailwind classes, then fall back to computed/attributes
+  const attrs = selectedElement.attributes;
+  const bgHex = parsed?.bgColor
+    ? twClassToHex(parsed.bgColor)
+    : attrs?._computedBg && attrs._computedBg !== "rgba(0, 0, 0, 0)"
+      ? rgbToHex(attrs._computedBg)
+      : null;
+  const textHex = parsed?.textColor
+    ? twClassToHex(parsed.textColor)
+    : attrs?._computedColor
+      ? rgbToHex(attrs._computedColor)
+      : null;
   const borderHex = parsed?.borderColor
     ? twClassToHex(parsed.borderColor)
     : null;
+  // SVG fill/stroke from attributes
+  const svgFill = attrs?.fill && attrs.fill !== "none" ? attrs.fill : null;
+  const svgStroke = attrs?.stroke && attrs.stroke !== "none" ? attrs.stroke : null;
 
   // Font weight display value
   const fontWeightValue = parsed?.fontWeight
@@ -534,13 +558,32 @@ export function PropertiesPanel({
 
         {/* ── Fill ──────────────────────────────────────────────── */}
         <Section title="Fill">
-          <ColorInput
-            hex={bgHex}
-            onChange={(hex) => {
-              const newClass = hexToTwClass(hex, "bg");
-              handleSwapClass(parsed?.bgColor ?? null, newClass);
-            }}
-          />
+          <div className="space-y-2">
+            <ColorInput
+              hex={bgHex}
+              onChange={(hex) => {
+                const newClass = hexToTwClass(hex, "bg");
+                handleSwapClass(parsed?.bgColor ?? null, newClass);
+              }}
+            />
+            {!parsed?.bgColor && bgHex && (
+              <p className="text-[10px] text-muted-foreground italic">Computed</p>
+            )}
+            {svgFill && (
+              <div>
+                <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                  SVG Fill
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <div
+                    className="size-5 shrink-0 rounded border border-border/60"
+                    style={{ backgroundColor: svgFill === "currentColor" ? (textHex || "#000") : svgFill }}
+                  />
+                  <span className="text-xs text-muted-foreground">{svgFill}</span>
+                </div>
+              </div>
+            )}
+          </div>
         </Section>
 
         {/* ── Stroke ────────────────────────────────────────────── */}
@@ -557,6 +600,20 @@ export function PropertiesPanel({
                 }
               }}
             />
+            {svgStroke && (
+              <div>
+                <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                  SVG Stroke
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <div
+                    className="size-5 shrink-0 rounded border border-border/60"
+                    style={{ backgroundColor: svgStroke === "currentColor" ? (textHex || "#000") : svgStroke }}
+                  />
+                  <span className="text-xs text-muted-foreground">{svgStroke}</span>
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-2">
               <PropInput
                 label="Width"
@@ -640,6 +697,9 @@ export function PropertiesPanel({
                 handleSwapClass(parsed?.textColor ?? null, newClass);
               }}
             />
+            {!parsed?.textColor && textHex && (
+              <p className="text-[10px] text-muted-foreground italic">Inherited</p>
+            )}
 
             {/* Font Family */}
             {parsed?.fontFamily && (
@@ -880,6 +940,30 @@ export function PropertiesPanel({
             </div>
           </Section>
         )}
+
+        {/* ── Attributes ──────────────────────────────────────────── */}
+        {attrs && (() => {
+          const visibleAttrs = Object.entries(attrs).filter(
+            ([key]) => !key.startsWith("_") && key !== "class",
+          );
+          if (visibleAttrs.length === 0) return null;
+          return (
+            <Section title="Attributes" defaultOpen={false}>
+              <div className="space-y-1.5">
+                {visibleAttrs.map(([key, val]) => (
+                  <div key={key}>
+                    <label className="block text-[10px] text-muted-foreground">
+                      {key}
+                    </label>
+                    <div className="truncate rounded bg-muted/30 px-2 py-0.5 text-[10px] font-mono text-foreground">
+                      {val.length > 60 ? val.slice(0, 60) + "…" : val}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Section>
+          );
+        })()}
 
         {/* ── Advanced / Raw Classes ────────────────────────────── */}
         {parsed && parsed.other.length > 0 && (

@@ -55,15 +55,38 @@ export function getIframeBridgeScript(): string {
       children.push(childEls[j].getAttribute('data-bf-id'));
     }
 
-    // Extract element-specific attributes (e.g. src/alt for img)
-    var attributes;
+    // Extract element attributes
+    var attributes = {};
     var tagName = el.tagName.toLowerCase();
-    if (tagName === 'img') {
-      attributes = {};
-      attributes.src = el.getAttribute('src') || '';
-      attributes.alt = el.getAttribute('alt') || '';
+
+    // Common attributes for all elements
+    var commonAttrs = ['id', 'href', 'src', 'alt', 'title', 'role', 'type', 'placeholder', 'name', 'value', 'action', 'method'];
+    for (var a = 0; a < commonAttrs.length; a++) {
+      var val = el.getAttribute(commonAttrs[a]);
+      if (val) attributes[commonAttrs[a]] = val;
     }
 
+    // SVG-specific attributes
+    if (tagName === 'svg' || el.closest('svg')) {
+      var svgAttrs = ['fill', 'stroke', 'stroke-width', 'viewBox', 'xmlns', 'stroke-linecap', 'stroke-linejoin', 'd', 'cx', 'cy', 'r', 'rx', 'ry', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'points', 'transform'];
+      for (var s = 0; s < svgAttrs.length; s++) {
+        var sv = el.getAttribute(svgAttrs[s]);
+        if (sv) attributes[svgAttrs[s]] = sv;
+      }
+    }
+
+    // Inline style
+    var inlineStyle = el.getAttribute('style');
+    if (inlineStyle) attributes.style = inlineStyle;
+
+    // Computed color (useful for elements using currentColor/inherited colors)
+    try {
+      var computed = window.getComputedStyle(el);
+      attributes._computedColor = computed.color;
+      attributes._computedBg = computed.backgroundColor;
+    } catch (e) {}
+
+    var hasAttrs = Object.keys(attributes).length > 0;
     var result = {
       bfId: bfId,
       tag: tagName,
@@ -73,7 +96,7 @@ export function getIframeBridgeScript(): string {
       parentBfId: parentBfId,
       children: children
     };
-    if (attributes) result.attributes = attributes;
+    if (hasAttrs) result.attributes = attributes;
     return result;
   }
 
