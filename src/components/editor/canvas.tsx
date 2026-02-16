@@ -267,7 +267,7 @@ export function Canvas({ iframeRef }: CanvasProps) {
                 ref={iframeRef}
                 title="Design canvas"
                 className="block h-full w-full border-none"
-                sandbox="allow-scripts allow-same-origin"
+                sandbox="allow-scripts"
                 tabIndex={-1}
               />
               {mode === "design" && (

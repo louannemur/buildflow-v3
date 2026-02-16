@@ -419,6 +419,56 @@ export function PropertiesPanel({
     ? parsed.opacity.replace("opacity-", "")
     : "100";
 
+  // ─── Element type detection for section visibility ─────────────
+
+  const tag = selectedElement.tag;
+  const isSvgElement =
+    tag === "svg" || tag === "path" || tag === "circle" || tag === "rect" ||
+    tag === "line" || tag === "polyline" || tag === "polygon" || tag === "ellipse" ||
+    tag === "g" || tag === "use" || tag === "defs" || tag === "clipPath";
+  const isTextElement =
+    tag === "p" || tag === "h1" || tag === "h2" || tag === "h3" || tag === "h4" ||
+    tag === "h5" || tag === "h6" || tag === "span" || tag === "a" || tag === "label" ||
+    tag === "strong" || tag === "em" || tag === "b" || tag === "i" || tag === "small" ||
+    tag === "blockquote" || tag === "q" || tag === "cite" || tag === "code" || tag === "pre" ||
+    tag === "li" || tag === "dt" || tag === "dd" || tag === "figcaption" || tag === "legend" ||
+    tag === "caption" || tag === "th" || tag === "td";
+  const isContainerElement =
+    tag === "div" || tag === "section" || tag === "nav" || tag === "header" ||
+    tag === "footer" || tag === "main" || tag === "article" || tag === "aside" ||
+    tag === "ul" || tag === "ol" || tag === "form" || tag === "fieldset" ||
+    tag === "figure" || tag === "details" || tag === "dialog" || tag === "table" ||
+    tag === "thead" || tag === "tbody" || tag === "tr";
+  const isInteractive =
+    tag === "button" || tag === "input" || tag === "textarea" || tag === "select";
+
+  // Section visibility — show if element type supports it OR already has the property
+  const showPadding =
+    !isSvgElement && (isContainerElement || isInteractive || isTextElement ||
+    !!(parsed?.paddingTop || parsed?.paddingRight || parsed?.paddingBottom || parsed?.paddingLeft));
+  const showFill =
+    !isSvgElement
+      ? (isContainerElement || isInteractive || isTextElement || isImageElement || !!parsed?.bgColor || !!bgHex)
+      : !!svgFill;
+  const showStroke =
+    !isSvgElement
+      ? (isContainerElement || isInteractive || !!parsed?.borderWidth || !!parsed?.borderColor || !!borderHex)
+      : !!svgStroke;
+  const showAppearance =
+    !isSvgElement && (isContainerElement || isInteractive || isImageElement ||
+    !!parsed?.opacity || !!parsed?.borderRadius);
+  const showTypography =
+    !isSvgElement && !isImageElement && (
+      isTextElement || isInteractive ||
+      !!parsed?.fontFamily || !!parsed?.fontWeight || !!parsed?.fontSize ||
+      !!parsed?.lineHeight || !!parsed?.letterSpacing || !!parsed?.textAlign ||
+      !!parsed?.textColor || !!textHex
+    );
+  const showEffects =
+    !isSvgElement && (isContainerElement || isInteractive || isImageElement || !!parsed?.shadow);
+  const showContent =
+    !!selectedElement.textContent || isImageElement;
+
   return (
     <div className="flex h-full flex-col">
       {/* ── Header ──────────────────────────────────────────────── */}
@@ -515,7 +565,7 @@ export function PropertiesPanel({
         </Section>
 
         {/* ── Padding ───────────────────────────────────────────── */}
-        <Section title="Padding">
+        {showPadding && <Section title="Padding">
           <div className="grid grid-cols-4 gap-2">
             <PropInput
               label="Top"
@@ -554,10 +604,10 @@ export function PropertiesPanel({
               }}
             />
           </div>
-        </Section>
+        </Section>}
 
         {/* ── Fill ──────────────────────────────────────────────── */}
-        <Section title="Fill">
+        {showFill && <Section title="Fill">
           <div className="space-y-2">
             <ColorInput
               hex={bgHex}
@@ -584,10 +634,10 @@ export function PropertiesPanel({
               </div>
             )}
           </div>
-        </Section>
+        </Section>}
 
         {/* ── Stroke ────────────────────────────────────────────── */}
-        <Section title="Stroke">
+        {showStroke && <Section title="Stroke">
           <div className="space-y-2">
             <ColorInput
               hex={borderHex}
@@ -650,10 +700,10 @@ export function PropertiesPanel({
               />
             </div>
           </div>
-        </Section>
+        </Section>}
 
         {/* ── Appearance ────────────────────────────────────────── */}
-        <Section title="Appearance">
+        {showAppearance && <Section title="Appearance">
           <div className="grid grid-cols-2 gap-2">
             <PropInput
               label="Opacity (%)"
@@ -683,10 +733,10 @@ export function PropertiesPanel({
               }}
             />
           </div>
-        </Section>
+        </Section>}
 
         {/* ── Typography ────────────────────────────────────────── */}
-        <Section title="Typography">
+        {showTypography && <Section title="Typography">
           <div className="space-y-2">
             {/* Text Color */}
             <ColorInput
@@ -835,10 +885,10 @@ export function PropertiesPanel({
               </div>
             </div>
           </div>
-        </Section>
+        </Section>}
 
         {/* ── Effects ───────────────────────────────────────────── */}
-        <Section title="Effects">
+        {showEffects && <Section title="Effects">
           <SelectInput
             label="Drop Shadow"
             value={shadowValue}
@@ -854,10 +904,10 @@ export function PropertiesPanel({
               }
             }}
           />
-        </Section>
+        </Section>}
 
         {/* ── Text Content ──────────────────────────────────────── */}
-        {(selectedElement.textContent || isImageElement) && (
+        {showContent && (
           <Section title="Content">
             <div className="space-y-2">
               {/* Alt Text for images */}

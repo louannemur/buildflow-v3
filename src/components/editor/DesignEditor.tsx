@@ -251,6 +251,7 @@ export function DesignEditor({
   const handleGenerateDesign = useCallback(
     async (config: GenerateConfig | "surprise") => {
       setStylePickerOpen(false);
+      setSelectedBfId(null);
 
       const prompt = buildGeneratePrompt(config);
       const label =
@@ -288,11 +289,12 @@ export function DesignEditor({
         setStreamingToIframe(false);
       }
     },
-    [source, designId, buildGeneratePrompt, editDesignStream, updateSource, addMessage, getHistory, setStreamingToIframe],
+    [source, designId, buildGeneratePrompt, editDesignStream, updateSource, addMessage, getHistory, setStreamingToIframe, setSelectedBfId],
   );
 
   const handleEditDesign = useCallback(
     async (prompt: string) => {
+      setSelectedBfId(null);
       const result = await editDesignStream(
         prompt,
         source,
@@ -321,7 +323,7 @@ export function DesignEditor({
         });
       }
     },
-    [source, designId, editDesignStream, updateSource, addMessage, getHistory, setStreamingToIframe],
+    [source, designId, editDesignStream, updateSource, addMessage, getHistory, setStreamingToIframe, setSelectedBfId],
   );
 
   const handleElementEdit = useCallback(
@@ -513,11 +515,10 @@ export function DesignEditor({
 
         {/* Center: Canvas / Code / Preview */}
         <div className="relative min-w-0 flex-1">
-          {mode === "code" ? (
-            <CodePanel />
-          ) : (
+          {mode === "code" && <CodePanel />}
+          <div className={mode === "code" ? "hidden" : "h-full"}>
             <Canvas iframeRef={iframeRef} />
-          )}
+          </div>
 
           {/* Streaming indicator (floating pill) */}
           <StreamingIndicator

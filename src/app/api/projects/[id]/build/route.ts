@@ -24,6 +24,9 @@ import { z } from "zod";
 const execAsync = promisify(exec);
 const MAX_FIX_ITERATIONS = 3;
 
+// Allow up to 5 minutes for build + verification on Vercel
+export const maxDuration = 300;
+
 /* ─── Validation ─────────────────────────────────────────────────────────── */
 
 const buildSchema = z.object({
@@ -590,6 +593,14 @@ export async function POST(
             return;
           }
 
+          // ─── Save to DB immediately (before verification) ─────────
+          // This ensures the build is available for download/publish
+          // even if the verification step times out on serverless.
+          await db
+            .update(buildOutputs)
+            .set({ status: "complete", files: completedFiles })
+            .where(eq(buildOutputs.id, buildOutputId));
+
           // ─── Build verification loop ─────────────────────────────
           // Skip for static HTML projects (no build step)
           let finalFiles = completedFiles;
@@ -726,12 +737,14 @@ export async function POST(
             }
           }
 
-          // ─── Save to DB and emit done ────────────────────────────
+          // ─── Update DB if verification improved files ────────────
 
-          await db
-            .update(buildOutputs)
-            .set({ status: "complete", files: finalFiles })
-            .where(eq(buildOutputs.id, buildOutputId));
+          if (finalFiles !== completedFiles) {
+            await db
+              .update(buildOutputs)
+              .set({ files: finalFiles })
+              .where(eq(buildOutputs.id, buildOutputId));
+          }
 
           await incrementUsage(userId, "aiGenerations");
 

@@ -96,7 +96,7 @@ export function HtmlPreview({ html }: { html: string }) {
             height: IFRAME_H,
             transform: `scale(${scale})`,
           }}
-          sandbox="allow-scripts allow-same-origin"
+          sandbox="allow-scripts"
           tabIndex={-1}
         />
       )}

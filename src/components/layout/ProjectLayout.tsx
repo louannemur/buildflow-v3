@@ -209,12 +209,14 @@ function SidebarContent({
   onStepClick,
   onOverviewClick,
   onItemClick,
+  onCollapse,
 }: {
   project: ProjectData;
   activeStep: ProjectStep | null;
   onStepClick: (step: ProjectStep) => void;
   onOverviewClick: () => void;
   onItemClick: (step: ProjectStep, itemId: string) => void;
+  onCollapse?: () => void;
 }) {
   // Read live data from the store for sidebar items
   const storeProject = useProjectStore((s) => s.project);
@@ -266,8 +268,8 @@ function SidebarContent({
 
   return (
     <div className="flex h-full flex-col">
-      {/* Back to projects */}
-      <div className="px-4 pt-3">
+      {/* Back to projects + collapse */}
+      <div className="flex items-center justify-between px-4 pt-3">
         <Link
           href="/projects"
           className="inline-flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
@@ -275,6 +277,17 @@ function SidebarContent({
           <ArrowLeft className="size-3" />
           Back to Projects
         </Link>
+        {onCollapse && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="size-6 text-muted-foreground hover:text-foreground"
+            onClick={onCollapse}
+            title="Collapse sidebar"
+          >
+            <PanelLeftClose className="size-3.5" />
+          </Button>
+        )}
       </div>
 
       {/* Project name */}
@@ -490,21 +503,6 @@ export function ProjectLayout({
               </Sheet>
             </div>
 
-            {/* Desktop sidebar toggle */}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="mr-2 hidden md:inline-flex"
-              onClick={toggleSidebar}
-              title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
-            >
-              {sidebarOpen ? (
-                <PanelLeftClose className="size-4" />
-              ) : (
-                <PanelLeft className="size-4" />
-              )}
-            </Button>
-
             {/* Logo */}
             <Link href="/home" className="mr-4 shrink-0">
               <span className="text-lg font-bold tracking-tight">
@@ -535,22 +533,35 @@ export function ProjectLayout({
 
         <div className="flex flex-1">
           {/* Desktop sidebar */}
-          <aside
-            className={cn(
-              "hidden shrink-0 border-r border-border/50 bg-sidebar transition-[width] duration-200 ease-in-out md:block",
-              sidebarOpen ? "w-60" : "w-0 overflow-hidden border-r-0"
-            )}
-          >
-            <div className="sticky top-14 h-[calc(100svh-3.5rem)] w-60">
-              <SidebarContent
-                project={project}
-                activeStep={activeStep}
-                onStepClick={handleStepClick}
-                onOverviewClick={handleOverviewClick}
-                onItemClick={handleItemClick}
-              />
-            </div>
-          </aside>
+          {sidebarOpen ? (
+            <aside
+              className="hidden shrink-0 border-r border-border/50 bg-sidebar transition-[width] duration-200 ease-in-out md:block w-60"
+            >
+              <div className="sticky top-14 h-[calc(100svh-3.5rem)] w-60">
+                <SidebarContent
+                  project={project}
+                  activeStep={activeStep}
+                  onStepClick={handleStepClick}
+                  onOverviewClick={handleOverviewClick}
+                  onItemClick={handleItemClick}
+                  onCollapse={toggleSidebar}
+                />
+              </div>
+            </aside>
+          ) : (
+            <aside className="hidden shrink-0 md:block">
+              <div className="sticky top-14 p-2">
+                <button
+                  onClick={toggleSidebar}
+                  className="flex items-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted/50"
+                  title="Expand sidebar"
+                >
+                  <span className="max-w-[120px] truncate">{project.name}</span>
+                  <PanelLeft className="size-4 shrink-0 text-muted-foreground" />
+                </button>
+              </div>
+            </aside>
+          )}
 
           {/* Main content */}
           <main className="flex-1 overflow-x-hidden">{children}</main>

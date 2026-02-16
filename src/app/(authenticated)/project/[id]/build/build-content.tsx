@@ -30,6 +30,7 @@ import {
   Unlock,
   X,
   Copy,
+  Eye,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -198,12 +199,22 @@ export function BuildContent() {
   const selectedFile = useBuildStore((s) => s.selectedFile);
   const expandedDirs = useBuildStore((s) => s.expandedDirs);
   const verifyStatus = useBuildStore((s) => s.verifyStatus);
+  const buildProjectId = useBuildStore((s) => s.projectId);
   const setSelectedFile = useBuildStore((s) => s.setSelectedFile);
   const toggleDir = useBuildStore((s) => s.toggleDir);
   const cancelBuild = useBuildStore((s) => s.cancelBuild);
   const startBuild = useBuildStore((s) => s.startBuild);
   const setBuildResult = useBuildStore((s) => s.setBuildResult);
   const setExpandedDirs = useBuildStore((s) => s.setExpandedDirs);
+  const resetBuildStore = useBuildStore((s) => s.reset);
+
+  // Reset build store when switching to a different project
+  useEffect(() => {
+    if (!project) return;
+    if (buildProjectId && buildProjectId !== project.id) {
+      resetBuildStore();
+    }
+  }, [project, buildProjectId, resetBuildStore]);
 
   // ─── Config state (local — only used for the config form) ─────────
 
@@ -258,6 +269,12 @@ export function BuildContent() {
   const [unpublishing, setUnpublishing] = useState(false);
   const [publishUpgradeOpen, setPublishUpgradeOpen] = useState(false);
 
+  // ─── Slug / subdomain state ───────────────────────────────────────
+  const [publishSlug, setPublishSlug] = useState("");
+  const [slugAvailable, setSlugAvailable] = useState<boolean | null>(null);
+  const [slugChecking, setSlugChecking] = useState(false);
+  const slugCheckTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // ─── Handle upgrade signal from store ──────────────────────────────
 
   useEffect(() => {
@@ -281,6 +298,8 @@ export function BuildContent() {
         const data = await res.json();
 
         if (data.output?.status === "complete" && data.output.files) {
+          // Tag the store with this project's ID so stale results are cleared on project switch
+          useBuildStore.setState({ projectId: project!.id });
           setBuildResult({
             files: data.output.files,
             id: data.output.id,
@@ -459,6 +478,14 @@ export function BuildContent() {
         if (data.published) {
           setPublishedUrl(data.url);
           setPublishStale(data.isStale ?? false);
+        } else if (!publishSlug && project?.name) {
+          // Pre-fill slug from project name when not yet published
+          const defaultSlug = project.name
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-|-$/g, "")
+            .slice(0, 48);
+          setPublishSlug(defaultSlug);
         }
       } catch {
         // Ignore
@@ -466,7 +493,47 @@ export function BuildContent() {
     }
 
     fetchPublishStatus();
-  }, [project, buildResult]);
+  }, [project, buildResult]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Slug change handler with debounced check ──────────────────────
+  const handleSlugChange = useCallback(
+    (value: string) => {
+      const sanitized = value
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, "")
+        .slice(0, 48);
+      setPublishSlug(sanitized);
+      setSlugAvailable(null);
+
+      if (slugCheckTimeout.current) clearTimeout(slugCheckTimeout.current);
+
+      if (!sanitized || sanitized.length < 3 || !project) {
+        setSlugChecking(false);
+        return;
+      }
+
+      setSlugChecking(true);
+      slugCheckTimeout.current = setTimeout(async () => {
+        try {
+          const res = await fetch(
+            `/api/projects/${project.id}/publish/check-slug?slug=${encodeURIComponent(sanitized)}`,
+          );
+          const data = await res.json();
+          // Only update if the slug hasn't changed since we started checking
+          setPublishSlug((current) => {
+            if (current === sanitized) {
+              setSlugAvailable(data.available);
+              setSlugChecking(false);
+            }
+            return current;
+          });
+        } catch {
+          setSlugChecking(false);
+        }
+      }, 500);
+    },
+    [project],
+  );
 
   // ─── Publish handler ──────────────────────────────────────────────
   const handlePublish = useCallback(async () => {
@@ -477,6 +544,8 @@ export function BuildContent() {
     try {
       const res = await fetch(`/api/projects/${project.id}/publish`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug: publishSlug || undefined }),
       });
       const data = await res.json();
 
@@ -498,7 +567,7 @@ export function BuildContent() {
     } finally {
       setPublishing(false);
     }
-  }, [project, publishing]);
+  }, [project, publishing, publishSlug]);
 
   // ─── Unpublish handler ────────────────────────────────────────────
   const handleUnpublish = useCallback(async () => {
@@ -542,6 +611,13 @@ export function BuildContent() {
       f.path.toLowerCase().includes(fileSearch.toLowerCase()),
     );
   }, [fileSearch, buildResult]);
+
+  // ─── Preview handler ───────────────────────────────────────────────
+  const openPreview = useCallback(() => {
+    if (!project) return;
+    window.open(`/preview/${project.id}`, "_blank");
+  }, [project]);
+
 
   // ─── Streaming computed values ──────────────────────────────────
 
@@ -620,6 +696,16 @@ export function BuildContent() {
               Cancel
             </Button>
           </div>
+        </div>
+
+        {/* Build disclaimer */}
+        <div className="flex items-start gap-2.5 border-b border-amber-500/20 bg-amber-500/5 px-4 py-2.5 sm:px-6">
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-500" />
+          <p className="text-[11px] leading-relaxed text-amber-700 dark:text-amber-400">
+            <span className="font-medium">Build in progress.</span>{" "}
+            You can navigate to other steps and your build will continue in the background.
+            Closing the browser tab or starting a new build will cancel the current one.
+          </p>
         </div>
 
         {/* File explorer (streaming) */}
@@ -721,6 +807,111 @@ export function BuildContent() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {publishedUrl ? (
+              <>
+                <div className="flex items-center gap-1.5 rounded-md bg-emerald-500/10 px-2.5 py-1.5">
+                  <Globe className="size-3 text-emerald-500" />
+                  <a
+                    href={publishedUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-medium text-emerald-600 hover:underline dark:text-emerald-400"
+                  >
+                    {publishedUrl.replace("https://", "")}
+                  </a>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-5 px-1"
+                    onClick={() => {
+                      navigator.clipboard.writeText(publishedUrl!);
+                      toast.success("URL copied!");
+                    }}
+                  >
+                    <Copy className="size-3" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-5 px-1"
+                    asChild
+                  >
+                    <a
+                      href={publishedUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <ExternalLink className="size-3" />
+                    </a>
+                  </Button>
+                </div>
+                {publishStale && (
+                  <Button
+                    size="sm"
+                    onClick={handlePublish}
+                    disabled={publishing}
+                  >
+                    {publishing && (
+                      <Loader2 className="size-3 animate-spin" />
+                    )}
+                    {publishing ? "Updating..." : "Update"}
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs text-muted-foreground"
+                  onClick={handleUnpublish}
+                  disabled={unpublishing}
+                >
+                  {unpublishing ? "Unpublishing..." : "Unpublish"}
+                </Button>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-1.5">
+                  <div className="flex items-center rounded-md border border-border bg-muted/40 text-xs">
+                    <input
+                      type="text"
+                      value={publishSlug}
+                      onChange={(e) => handleSlugChange(e.target.value)}
+                      placeholder="my-site"
+                      className="h-7 w-32 bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground/50"
+                    />
+                    <span className="border-l border-border px-2 text-muted-foreground">.calypso.build</span>
+                    <span className="flex w-6 items-center justify-center">
+                      {slugChecking ? (
+                        <Loader2 className="size-3 animate-spin text-muted-foreground" />
+                      ) : slugAvailable === true ? (
+                        <Check className="size-3 text-emerald-500" />
+                      ) : slugAvailable === false ? (
+                        <X className="size-3 text-destructive" />
+                      ) : null}
+                    </span>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={handlePublish}
+                    disabled={publishing || !publishSlug || publishSlug.length < 3 || slugAvailable === false || slugChecking}
+                  >
+                    {publishing ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : (
+                      <Globe className="size-3" />
+                    )}
+                    {publishing ? "Publishing..." : "Publish"}
+                  </Button>
+                </div>
+                {publishError && (
+                  <p className="text-xs text-destructive">{publishError}</p>
+                )}
+              </>
+            )}
+            <div className="mx-1 h-5 w-px bg-border/60" />
+            <Button variant="outline" size="sm" onClick={openPreview}>
+              <Eye className="size-3.5" />
+              Preview
+            </Button>
             <Button variant="outline" size="sm" onClick={handleDownload}>
               <Download className="size-3.5" />
               Download ZIP
@@ -827,92 +1018,8 @@ export function BuildContent() {
           </div>
         </div>
 
-        {/* Publish + Deploy bar */}
-        <div className="flex items-center justify-between border-t border-border/60 px-4 py-3 sm:px-6">
-          {/* Left side: Publish */}
-          <div className="flex items-center gap-3">
-            {publishedUrl ? (
-              <>
-                <div className="flex items-center gap-2 rounded-md bg-emerald-500/10 px-3 py-1.5">
-                  <Globe className="size-3 text-emerald-500" />
-                  <a
-                    href={publishedUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs font-medium text-emerald-600 hover:underline dark:text-emerald-400"
-                  >
-                    {publishedUrl.replace("https://", "")}
-                  </a>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-5 px-1"
-                    onClick={() => {
-                      navigator.clipboard.writeText(publishedUrl!);
-                      toast.success("URL copied!");
-                    }}
-                  >
-                    <Copy className="size-3" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-5 px-1"
-                    asChild
-                  >
-                    <a
-                      href={publishedUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <ExternalLink className="size-3" />
-                    </a>
-                  </Button>
-                </div>
-                {publishStale && (
-                  <Button
-                    size="sm"
-                    onClick={handlePublish}
-                    disabled={publishing}
-                  >
-                    {publishing && (
-                      <Loader2 className="size-3 animate-spin" />
-                    )}
-                    {publishing ? "Updating..." : "Update"}
-                  </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-xs text-muted-foreground"
-                  onClick={handleUnpublish}
-                  disabled={unpublishing}
-                >
-                  {unpublishing ? "Unpublishing..." : "Unpublish"}
-                </Button>
-              </>
-            ) : (
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  onClick={handlePublish}
-                  disabled={publishing}
-                >
-                  {publishing ? (
-                    <Loader2 className="size-3 animate-spin" />
-                  ) : (
-                    <Globe className="size-3" />
-                  )}
-                  {publishing ? "Publishing..." : "Publish"}
-                </Button>
-                {publishError && (
-                  <p className="text-xs text-destructive">{publishError}</p>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Right side: Export options */}
+        {/* Export bar */}
+        <div className="flex items-center justify-end border-t border-border/60 px-4 py-3 sm:px-6">
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground">Export:</span>
             <Button variant="outline" size="sm" onClick={openDeployDialog}>
@@ -1127,6 +1234,7 @@ export function BuildContent() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
       </div>
     );
   }
@@ -1214,25 +1322,21 @@ export function BuildContent() {
 
           {/* TypeScript */}
           {showTypeScript && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <ToggleRight className="size-4 text-muted-foreground" />
-                <Label className="text-sm font-medium">TypeScript</Label>
-              </div>
-              <Card className="flex items-center justify-between p-4">
+            <Card className="flex items-center justify-between p-4">
+              <div className="flex items-center gap-3">
+                <ToggleRight className="size-4 shrink-0 text-muted-foreground" />
                 <div>
-                  <p className="text-sm font-medium">Include TypeScript</p>
+                  <p className="text-sm font-medium">TypeScript</p>
                   <p className="text-[11px] text-muted-foreground">
-                    Adds type safety with .tsx/.ts files and proper type
-                    definitions
+                    Adds type safety with .tsx/.ts files and proper type definitions
                   </p>
                 </div>
-                <Switch
-                  checked={includeTypeScript}
-                  onCheckedChange={setIncludeTypeScript}
-                />
-              </Card>
-            </div>
+              </div>
+              <Switch
+                checked={includeTypeScript}
+                onCheckedChange={setIncludeTypeScript}
+              />
+            </Card>
           )}
         </div>
 

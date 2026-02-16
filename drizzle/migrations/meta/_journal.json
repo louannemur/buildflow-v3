@@ -22,6 +22,20 @@
       "when": 1771214988580,
       "tag": "0002_solid_korg",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1771276863253,
+      "tag": "0003_chemical_maggott",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1771279634045,
+      "tag": "0004_happy_micromacro",
+      "breakpoints": true
     }
   ]
 }

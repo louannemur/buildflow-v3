@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, ne } from "drizzle-orm";
 import { createHash } from "crypto";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -12,6 +12,9 @@ import {
 import { getUserPlan } from "@/lib/usage";
 
 const PUBLISH_DOMAIN = process.env.PUBLISH_DOMAIN || "calypso.build";
+
+// Allow up to 2 minutes for deployment + polling
+export const maxDuration = 120;
 
 /* ─── Slug helpers ─────────────────────────────────────────────────────────── */
 
@@ -56,7 +59,7 @@ async function uniqueSlug(base: string, projectId: string): Promise<string> {
 /* ─── POST: Publish or re-publish ──────────────────────────────────────────── */
 
 export async function POST(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
@@ -67,6 +70,17 @@ export async function POST(
 
     const { id: projectId } = await params;
     const userId = session.user.id;
+
+    // Parse optional custom slug from request body
+    let requestedSlug: string | undefined;
+    try {
+      const body = await req.json();
+      if (body.slug && typeof body.slug === "string") {
+        requestedSlug = body.slug.toLowerCase().trim();
+      }
+    } catch {
+      // No body or invalid JSON — that's fine, slug is optional
+    }
 
     // Plan check: Pro or Founding only
     const plan = await getUserPlan(userId);
@@ -147,18 +161,45 @@ export async function POST(
     const teamId = process.env.VERCEL_TEAM_ID;
     const teamQuery = teamId ? `?teamId=${teamId}` : "";
 
-    // Check for existing publish (re-publish case)
+    // Check for existing publish (including soft-deleted for re-publish)
     const existingPublish = await db.query.publishedSites.findFirst({
       where: eq(publishedSites.projectId, projectId),
     });
 
-    // Generate unique slug for custom domain
-    const slug = await uniqueSlug(slugify(project.name), projectId);
+    // Resolve slug: user-provided > existing > auto-generated
+    const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,46}[a-z0-9])?$/;
+    let slug: string;
+
+    if (requestedSlug) {
+      if (!SLUG_RE.test(requestedSlug)) {
+        return NextResponse.json(
+          { error: "Invalid slug. Use 3-48 lowercase letters, numbers, and hyphens." },
+          { status: 400 },
+        );
+      }
+      // Check uniqueness (allow if it's this project's own slug)
+      const taken = await db.query.publishedSites.findFirst({
+        where: and(
+          eq(publishedSites.slug, requestedSlug),
+          ne(publishedSites.projectId, projectId),
+        ),
+        columns: { id: true },
+      });
+      if (taken) {
+        return NextResponse.json(
+          { error: "This address is already taken. Please choose a different one." },
+          { status: 409 },
+        );
+      }
+      slug = requestedSlug;
+    } else {
+      slug = existingPublish?.slug ?? await uniqueSlug(slugify(project.name), projectId);
+    }
     const customDomain = `${slug}.${PUBLISH_DOMAIN}`;
     const customUrl = `https://${customDomain}`;
 
-    // Deterministic Vercel project name
-    const vercelProjectName = `calypso-${projectId.slice(0, 8)}`;
+    // Reuse existing Vercel project name if available, otherwise create deterministic name
+    const vercelProjectName = existingPublish?.vercelProjectId ?? `calypso-${projectId.slice(0, 8)}`;
 
     // Upload files to Vercel
     const files = output.files as { path: string; content: string }[];
@@ -238,6 +279,41 @@ export async function POST(
 
     const deployment = await deployRes.json();
     const vercelProjectId = deployment.projectId ?? vercelProjectName;
+
+    // Wait for deployment to be ready (poll every 2s, up to 90s)
+    const deployId = deployment.id;
+    if (deployId) {
+      const maxWait = 90_000;
+      const interval = 2_000;
+      const start = Date.now();
+
+      while (Date.now() - start < maxWait) {
+        await new Promise((r) => setTimeout(r, interval));
+
+        try {
+          const statusRes = await fetch(
+            `https://api.vercel.com/v13/deployments/${deployId}${teamQuery}`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            },
+          );
+
+          if (statusRes.ok) {
+            const statusData = await statusRes.json();
+            if (statusData.readyState === "READY") break;
+            if (statusData.readyState === "ERROR") {
+              console.error("Deployment failed:", statusData.readyState);
+              return NextResponse.json(
+                { error: "Deployment failed. Please try again." },
+                { status: 500 },
+              );
+            }
+          }
+        } catch {
+          // Continue polling on network error
+        }
+      }
+    }
 
     // Assign custom domain to the Vercel project
     // This adds slug.calypso.build as a domain on the project
@@ -409,33 +485,35 @@ export async function DELETE(
       where: eq(publishedSites.projectId, projectId),
     });
 
-    if (!site) {
+    if (!site || site.status === "deleted") {
       return NextResponse.json({ error: "Not published" }, { status: 404 });
     }
 
-    // Delete the Vercel project (best-effort — removes all deployments + domain)
+    // Remove the custom domain from the Vercel project (keep the project for fast re-publish)
     const token = process.env.VERCEL_PUBLISH_TOKEN;
     const teamId = process.env.VERCEL_TEAM_ID;
     const teamQuery = teamId ? `?teamId=${teamId}` : "";
 
-    if (token && site.vercelProjectId) {
+    if (token && site.vercelProjectId && site.slug) {
+      const domain = `${site.slug}.${PUBLISH_DOMAIN}`;
       try {
         await fetch(
-          `https://api.vercel.com/v9/projects/${site.vercelProjectId}${teamQuery}`,
+          `https://api.vercel.com/v9/projects/${site.vercelProjectId}/domains/${domain}${teamQuery}`,
           {
             method: "DELETE",
             headers: { Authorization: `Bearer ${token}` },
           },
         );
       } catch (err) {
-        console.error("Failed to delete Vercel project:", err);
-        // Continue with DB cleanup even if Vercel delete fails
+        console.error("Failed to remove domain from Vercel project:", err);
       }
     }
 
-    // Remove from DB
+    // Soft-delete: mark as deleted instead of removing the row
+    // This preserves the Vercel project ID and slug for fast re-publishing
     await db
-      .delete(publishedSites)
+      .update(publishedSites)
+      .set({ status: "deleted" })
       .where(eq(publishedSites.id, site.id));
 
     return NextResponse.json({ success: true });

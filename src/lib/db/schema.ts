@@ -57,6 +57,7 @@ export const usersRelations = relations(users, ({ many, one }) => ({
   projects: many(projects),
   designs: many(designs),
   savedComponents: many(savedComponents),
+  chatConversations: many(chatConversations),
 }));
 
 // ─── Accounts (NextAuth) ────────────────────────────────────────────────────
@@ -226,6 +227,7 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   buildConfig: one(buildConfigs),
   buildOutputs: many(buildOutputs),
   publishedSite: one(publishedSites),
+  chatConversations: many(chatConversations),
 }));
 
 // ─── Features ───────────────────────────────────────────────────────────────
@@ -473,6 +475,10 @@ export const buildOutputs = pgTable("build_outputs", {
   files: jsonb("files").$type<BuildFile[]>(),
   zipUrl: text("zip_url"),
   error: text("error"),
+  previewUrl: text("preview_url"),
+  previewToken: text("preview_token"),
+  previewDeploymentId: text("preview_deployment_id"),
+  previewVercelProjectId: text("preview_vercel_project_id"),
   createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { mode: "date" })
     .notNull()
@@ -530,6 +536,50 @@ export const publishedSitesRelations = relations(
     buildOutput: one(buildOutputs, {
       fields: [publishedSites.buildOutputId],
       references: [buildOutputs.id],
+    }),
+  }),
+);
+
+// ─── Chat Conversations ────────────────────────────────────────────────────
+
+export type ChatMessageRecord = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  intent?: string;
+  actions?: { tool: string; success: boolean; data?: Record<string, unknown> }[];
+};
+
+export const chatConversations = pgTable("chat_conversations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").references(() => projects.id, {
+    onDelete: "set null",
+  }),
+  title: text("title").notNull(),
+  messages: jsonb("messages")
+    .$type<ChatMessageRecord[]>()
+    .notNull()
+    .default([]),
+  createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { mode: "date" })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
+
+export const chatConversationsRelations = relations(
+  chatConversations,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [chatConversations.userId],
+      references: [users.id],
+    }),
+    project: one(projects, {
+      fields: [chatConversations.projectId],
+      references: [projects.id],
     }),
   }),
 );

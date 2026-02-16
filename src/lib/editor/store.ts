@@ -235,16 +235,21 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   setElementTree: (tree) => {
     set({ elementTree: tree });
-    // Refresh selected/hovered elements with fresh data
+    // Refresh selected/hovered elements with fresh data;
+    // if the element no longer exists in the new tree, clear the selection entirely
     const { selectedBfId, hoveredBfId } = get();
     if (selectedBfId) {
+      const found = tree.find((el) => el.bfId === selectedBfId) ?? null;
       set({
-        selectedElement: tree.find((el) => el.bfId === selectedBfId) ?? null,
+        selectedBfId: found ? selectedBfId : null,
+        selectedElement: found,
       });
     }
     if (hoveredBfId) {
+      const found = tree.find((el) => el.bfId === hoveredBfId) ?? null;
       set({
-        hoveredElement: tree.find((el) => el.bfId === hoveredBfId) ?? null,
+        hoveredBfId: found ? hoveredBfId : null,
+        hoveredElement: found,
       });
     }
   },

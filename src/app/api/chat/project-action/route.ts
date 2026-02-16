@@ -216,6 +216,27 @@ const tools: Anthropic.Tool[] = [
       required: ["page_id"],
     },
   },
+  {
+    name: "navigate_to_step",
+    description:
+      "Navigate the user to a specific project step. Use when the user wants to design pages (navigate to 'designs'), build the project (navigate to 'build'), or go to any other step. For designing a specific page, include the page_id.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        step: {
+          type: "string",
+          enum: ["features", "flows", "pages", "designs", "build"],
+          description: "The project step to navigate to",
+        },
+        page_id: {
+          type: "string",
+          description:
+            "Optional: the ID of a specific page to open in the design editor. Only used with step='designs'.",
+        },
+      },
+      required: ["step"],
+    },
+  },
 ];
 
 /* ─── System prompt ───────────────────────────────────────────────────────── */
@@ -251,6 +272,14 @@ ${currentFlows.length > 0 ? currentFlows.map((f) => `- [${f.id}] ${f.title} (${f
 Pages (${currentPages.length}):
 ${currentPages.length > 0 ? currentPages.map((p) => `- [${p.id}] ${p.title}${p.description ? `: ${p.description}` : ""}`).join("\n") : "(none)"}
 
+PROJECT WORKFLOW:
+This tool follows a step-by-step workflow: Features → User Flows → Pages → Designs → Build.
+- Features: Define what the app does
+- User Flows: Map out user journeys and interactions
+- Pages: Define the pages/screens and their content
+- Designs: AI generates visual HTML designs for each page — this is where pages get designed
+- Build: AI generates a complete, deployable codebase from the designs
+
 INSTRUCTIONS:
 - Help the user manage their project by adding, updating, or deleting features, user flows, and pages.
 - Use the provided tools to make changes. You can call multiple tools in one response.
@@ -258,10 +287,16 @@ INSTRUCTIONS:
 - When the user asks to change/edit/update something, find the matching item by name and use the update tool with its ID.
 - When the user asks to remove/delete something, find the matching item by name and use the delete tool with its ID.
 - If the user's request is ambiguous, ask for clarification instead of guessing.
-- After making changes, briefly confirm what you did.
+- After making changes, ALWAYS briefly summarize what you did (e.g. "Added the 'User Authentication' feature with email/password login."). The user will be taken to their changes automatically.
 - If the user asks something unrelated to project management (like general questions), respond helpfully without using any tools.
 - Keep responses concise — 1-3 sentences.
-- When adding flows, create meaningful steps with appropriate types (action, decision, navigation, input, display).`;
+- When adding flows, create meaningful steps with appropriate types (action, decision, navigation, input, display).
+
+NAVIGATION:
+- When the user asks to design a page, create a design, generate a design, or anything related to visual design — use navigate_to_step with step="designs". If they mention a specific page, find its ID and include page_id.
+- When the user asks to build the project, generate code, or deploy — use navigate_to_step with step="build".
+- When the user asks to go to or view features, flows, pages, etc. — use navigate_to_step with the appropriate step.
+- NEVER say you cannot create designs or suggest external tools like Figma. You CAN design pages by navigating to the designs step.`;
 }
 
 /* ─── Tool execution ──────────────────────────────────────────────────────── */
@@ -466,6 +501,17 @@ async function executeTool(
           tool: toolName,
           success: true,
           data: { id: deletedPage.id },
+        };
+      }
+
+      case "navigate_to_step": {
+        return {
+          tool: toolName,
+          success: true,
+          data: {
+            step: input.step as string,
+            page_id: (input.page_id as string) ?? null,
+          },
         };
       }
 
