@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useEffect } from "react";
+import { useMemo, useRef, useEffect, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
@@ -10,19 +10,35 @@ const CONNECTION_DISTANCE = 2.2;
 const NODE_SIZE = 0.15;
 const CENTER_NODE_SIZE = 0.8;
 
-// Calypso warm palette
-const COLORS = {
-  primary: new THREE.Color("#C4501A"),   // terracotta accent nodes
-  secondary: new THREE.Color("#8B7355"), // warm brown nodes
-  line: new THREE.Color("#8B7355"),      // warm brown lines
-  center: new THREE.Color("#C4501A"),    // terracotta center
-};
-
 function NetworkSphere({ isTalking = false }: { isTalking?: boolean }) {
   const groupRef = useRef<THREE.Group>(null);
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const linesRef = useRef<THREE.LineSegments>(null);
   const centerRef = useRef<THREE.Mesh>(null);
+
+  // Read colors from CSS custom properties and re-read on theme change
+  const readThemeColors = () => {
+    const style = getComputedStyle(document.documentElement);
+    return {
+      primary: new THREE.Color(style.getPropertyValue("--primary").trim()),
+      secondary: new THREE.Color(style.getPropertyValue("--muted-foreground").trim()),
+      line: new THREE.Color(style.getPropertyValue("--muted-foreground").trim()),
+      center: new THREE.Color(style.getPropertyValue("--primary").trim()),
+    };
+  };
+
+  const [themeColors, setThemeColors] = useState(readThemeColors);
+
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setThemeColors(readThemeColors());
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+    return () => observer.disconnect();
+  }, []);
 
   const { basePoints, linePairs, nodeColors } = useMemo(() => {
     const geo = new THREE.IcosahedronGeometry(RADIUS, DETAIL);
@@ -50,7 +66,7 @@ function NetworkSphere({ isTalking = false }: { isTalking?: boolean }) {
       // Deterministic pseudo-random based on index (avoids Math.random in render)
       const hash = ((i * 2654435761) >>> 0) / 4294967296;
       const isAccent = hash > 0.85 || point.y > RADIUS * 0.8;
-      colorObj.set(isAccent ? COLORS.primary : COLORS.secondary);
+      colorObj.set(isAccent ? themeColors.primary : themeColors.secondary);
       colorObj.toArray(colors, i * 3);
     });
 
@@ -64,7 +80,7 @@ function NetworkSphere({ isTalking = false }: { isTalking?: boolean }) {
     }
 
     return { basePoints: tempPoints, linePairs: pairs, nodeColors: colors };
-  }, []);
+  }, [themeColors]);
 
   const lineGeometry = useMemo(() => {
     const geometry = new THREE.BufferGeometry();
@@ -207,11 +223,11 @@ function NetworkSphere({ isTalking = false }: { isTalking?: boolean }) {
     <group ref={groupRef}>
       <mesh ref={centerRef} position={[0, 0, 0]}>
         <sphereGeometry args={[CENTER_NODE_SIZE, 32, 32]} />
-        <meshBasicMaterial color={COLORS.center} />
+        <meshBasicMaterial color={themeColors.center} />
       </mesh>
 
       <lineSegments ref={linesRef} geometry={lineGeometry}>
-        <lineBasicMaterial color={COLORS.line} transparent opacity={0.4} />
+        <lineBasicMaterial color={themeColors.line} transparent opacity={0.4} />
       </lineSegments>
 
       <instancedMesh

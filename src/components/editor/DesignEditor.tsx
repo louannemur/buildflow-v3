@@ -10,12 +10,14 @@ import { CodePanel } from "./CodePanel";
 import { Toolbar } from "./Toolbar";
 import { StylePickerModal } from "./StylePickerModal";
 import type { GenerateConfig } from "./StylePickerModal";
+import { RegenerationModal } from "./RegenerationModal";
 import { StreamingIndicator } from "./StreamingOverlay";
 import { VersionHistory } from "./VersionHistory";
 import { EditorChatPanel } from "./EditorChatPanel";
 import { useAIGenerate } from "@/hooks/useAIGenerate";
 import { useChatHistoryStore } from "@/stores/chat-history-store";
 import { UpgradeModal } from "@/components/features/upgrade-modal";
+import { useProjectStore } from "@/stores/project-store";
 import { extractHtmlFromStream } from "@/lib/ai/extract-code";
 
 
@@ -76,6 +78,8 @@ export function DesignEditor({
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const [stylePickerOpen, setStylePickerOpen] = useState(false);
+  const [regenModalOpen, setRegenModalOpen] = useState(false);
+  const regenerateAllDesigns = useProjectStore((s) => s.regenerateAllDesigns);
 
   // Refs for live iframe streaming
   const streamHtmlStartedRef = useRef(false);
@@ -485,7 +489,14 @@ export function DesignEditor({
             designName={designName}
             isStyleGuide={isStyleGuide}
             isProjectDesign={!!projectId}
-            onGenerate={() => setStylePickerOpen(true)}
+            onGenerate={() => {
+              // If design has content AND is a project design, show regeneration modal
+              if (source.trim() && projectId && pageId) {
+                setRegenModalOpen(true);
+              } else {
+                setStylePickerOpen(true);
+              }
+            }}
           />
         </div>
       )}
@@ -551,6 +562,40 @@ export function DesignEditor({
         onOpenChange={setStylePickerOpen}
         onGenerate={handleGenerateDesign}
       />
+
+      {/* Regeneration modal (project designs with content) */}
+      {projectId && pageId && (
+        <RegenerationModal
+          open={regenModalOpen}
+          onOpenChange={setRegenModalOpen}
+          projectId={projectId}
+          pageId={pageId}
+          designId={designId}
+          isStyleGuide={isStyleGuide}
+          onRegenerationComplete={(html) => {
+            updateSource(html);
+            // Save to DB
+            fetch(`/api/designs/${designId}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ html }),
+            });
+          }}
+          onRevert={async (previousHtml) => {
+            updateSource(previousHtml);
+            await fetch(`/api/designs/${designId}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ html: previousHtml }),
+            });
+          }}
+          onUpdateAll={() => {
+            if (pageId) {
+              regenerateAllDesigns(pageId);
+            }
+          }}
+        />
+      )}
 
       {/* Upgrade modal (shown on 429) */}
       <UpgradeModal

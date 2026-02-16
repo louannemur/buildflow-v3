@@ -128,6 +128,7 @@ interface ProjectState {
   designGenCurrentPageName: string | null;
   designGenProjectId: string | null;
   generateAllDesigns: () => Promise<void>;
+  regenerateAllDesigns: (exceptPageId: string) => Promise<void>;
   resumeDesignGeneration: () => void;
 
   // Loading
@@ -169,6 +170,7 @@ async function runDesignBatch(
   projectId: string,
   pages: ProjectPage[],
   set: (partial: Partial<ProjectState>) => void,
+  options?: { forceRegenerate?: boolean },
 ) {
   set({
     designGenerating: true,
@@ -195,7 +197,11 @@ async function runDesignBatch(
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pageId: page.id, skipReview: true }),
+          body: JSON.stringify({
+            pageId: page.id,
+            skipReview: true,
+            ...(options?.forceRegenerate && { forceRegenerate: true }),
+          }),
         },
       );
 
@@ -204,7 +210,12 @@ async function runDesignBatch(
         // Show design immediately in store
         const s = useProjectStore.getState();
         if (s.project?.id === projectId) {
-          s.addDesign(design);
+          const exists = s.designs.some((d) => d.id === design.id);
+          if (exists) {
+            s.updateDesign(design.id, design);
+          } else {
+            s.addDesign(design);
+          }
         }
         // Fire off Claude review in background while moving to next page
         reviewDesignInBackground(projectId, design.id);
@@ -345,6 +356,23 @@ export const useProjectStore = create<ProjectState>((set) => ({
     localStorage.setItem(batchKey, JSON.stringify(toGenerate.map((p) => p.id)));
 
     runDesignBatch(state.project.id, toGenerate, set);
+  },
+
+  regenerateAllDesigns: async (exceptPageId: string) => {
+    const state = useProjectStore.getState();
+    if (!state.project || state.designGenerating) return;
+
+    // Get all pages that have existing designs, except the one we're skipping
+    const designedPageIds = new Set(
+      state.designs
+        .filter((d) => d.pageId && d.html && d.html.length > 0 && d.pageId !== exceptPageId)
+        .map((d) => d.pageId),
+    );
+    const toRegenerate = state.pages.filter((p) => designedPageIds.has(p.id));
+
+    if (toRegenerate.length === 0) return;
+
+    runDesignBatch(state.project.id, toRegenerate, set, { forceRegenerate: true });
   },
 
   resumeDesignGeneration: () => {

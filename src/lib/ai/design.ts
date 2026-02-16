@@ -285,6 +285,9 @@ interface GenerateDesignParams {
   styleGuideCode?: string;
   archetype?: string;
   components?: string[];
+  allPageNames?: string[];
+  otherDesignHtmls?: { pageName: string; html: string }[];
+  creativePrompt?: string;
 }
 
 export async function generateDesign(
@@ -299,6 +302,9 @@ export async function generateDesign(
     styleGuideCode,
     archetype,
     components,
+    allPageNames,
+    otherDesignHtmls,
+    creativePrompt,
   } = params;
 
   const pageGuidance = getPageTypeGuidance(pageType);
@@ -317,13 +323,33 @@ export async function generateDesign(
 
   let creativeSeedContext = "";
   if (!styleGuideCode) {
-    const seeds = pickRandomSeeds(2);
-    creativeSeedContext = `\n\nCREATIVE DIRECTION — Pick ONE of these approaches (or ignore both and surprise me):\n${seeds.map((s, i) => `${i + 1}. ${s}`).join("\n")}`;
+    if (creativePrompt) {
+      creativeSeedContext = `\n\nCREATIVE DIRECTION (from the user):\n${creativePrompt}`;
+    } else {
+      const seeds = pickRandomSeeds(2);
+      creativeSeedContext = `\n\nCREATIVE DIRECTION — Pick ONE of these approaches (or ignore both and surprise me):\n${seeds.map((s, i) => `${i + 1}. ${s}`).join("\n")}`;
+    }
   }
 
   let componentsContext = "";
   if (components && components.length > 0) {
     componentsContext = `\n\nAVAILABLE COMPONENTS:\n${components.join("\n")}`;
+  }
+
+  // Navigation context — all pages in the project for proper nav links
+  let navigationContext = "";
+  if (allPageNames && allPageNames.length > 0) {
+    navigationContext = `\n\nPROJECT PAGES (use these as navigation links): ${allPageNames.join(", ")}`;
+  }
+
+  // Style consistency context — compact token summaries from other designed pages
+  let consistencyContext = "";
+  if (otherDesignHtmls && otherDesignHtmls.length > 0) {
+    const summaries = otherDesignHtmls.slice(0, 3).map((d) => {
+      const tokens = extractStyleTokens(d.html);
+      return `  "${d.pageName}": font=${tokens.fonts.primary}, bg=${tokens.colors.background}, accent=${tokens.colors.accent}, radius=${tokens.borderRadius}`;
+    });
+    consistencyContext = `\n\nOTHER DESIGNED PAGES (match their style for visual consistency):\n${summaries.join("\n")}`;
   }
 
   const systemPrompt = `${DESIGN_SYSTEM_PROMPT}${archetypeDirective}${styleTokenContext}`;
@@ -335,7 +361,7 @@ Page: "${pageName}" (${pageType})
 ${pageGuidance}
 
 Sections to include: ${sections.join(", ")}
-${creativeSeedContext}${componentsContext}
+${navigationContext}${consistencyContext}${creativeSeedContext}${componentsContext}
 
 Remember: ONE visual concept. Make it award-winning. Output a complete HTML document.`;
 

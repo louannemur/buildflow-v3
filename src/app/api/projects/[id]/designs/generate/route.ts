@@ -8,7 +8,6 @@ import {
   projects,
   pages,
   features,
-  userFlows,
 } from "@/lib/db/schema";
 import { getUserPlan, checkUsage, incrementUsage } from "@/lib/usage";
 import { generateDesign, inferPageType, reviewAndFixDesign } from "@/lib/ai/design";
@@ -43,6 +42,9 @@ export async function POST(
     const body = await req.json();
     const pageId = body.pageId;
     const skipReview = body.skipReview === true;
+    const forceRegenerate = body.forceRegenerate === true;
+    const useStyleGuide = body.useStyleGuide !== false; // default true
+    const stylePrompt: string | undefined = body.stylePrompt;
 
     if (!pageId || typeof pageId !== "string") {
       return NextResponse.json(
@@ -99,8 +101,8 @@ export async function POST(
       design = created;
     }
 
-    // Skip if already has HTML content
-    if (design.html && design.html.length > 0) {
+    // Skip if already has HTML content (unless force regenerating)
+    if (design.html && design.html.length > 0 && !forceRegenerate) {
       return NextResponse.json({
         id: design.id,
         name: design.name,
@@ -116,19 +118,53 @@ export async function POST(
       });
     }
 
-    // Fetch style guide if one exists
+    // Save pre-regeneration snapshot for revert
+    let previousHtml: string | null = null;
+    if (forceRegenerate && design.html && design.html.length > 0) {
+      previousHtml = design.html;
+      await db.insert(designVersions).values({
+        designId: design.id,
+        html: design.html,
+        prompt: "Pre-regeneration snapshot",
+      });
+    }
+
+    // Fetch style guide if one exists (and we want to use it)
     let styleGuideCode: string | undefined;
-    const styleGuide = await db.query.designs.findFirst({
+    if (useStyleGuide) {
+      const styleGuide = await db.query.designs.findFirst({
+        where: and(
+          eq(designs.projectId, projectId),
+          eq(designs.isStyleGuide, true),
+          eq(designs.userId, userId),
+        ),
+        columns: { id: true, html: true },
+      });
+      if (styleGuide?.html && styleGuide.id !== design.id) {
+        styleGuideCode = styleGuide.html;
+      }
+    }
+
+    // Fetch all pages for navigation context
+    const allPages = await db.query.pages.findMany({
+      where: eq(pages.projectId, projectId),
+      columns: { id: true, title: true, description: true },
+      orderBy: [asc(pages.order)],
+    });
+
+    // Fetch existing designs for other pages (style consistency)
+    const existingDesigns = await db.query.designs.findMany({
       where: and(
         eq(designs.projectId, projectId),
-        eq(designs.isStyleGuide, true),
         eq(designs.userId, userId),
       ),
-      columns: { html: true },
+      columns: { pageId: true, html: true, name: true },
     });
-    if (styleGuide?.html) {
-      styleGuideCode = styleGuide.html;
-    }
+
+    const allPageNames = allPages.map((p) => p.title);
+    const otherDesignHtmls = existingDesigns
+      .filter((d) => d.pageId !== pageId && d.html && d.html.length > 0)
+      .map((d) => ({ pageName: d.name, html: d.html }));
 
     // Build sections from page contents + project features
     const sections: string[] = [];
@@ -166,6 +202,9 @@ export async function POST(
       pageType,
       sections,
       styleGuideCode,
+      allPageNames,
+      otherDesignHtmls,
+      creativePrompt: !useStyleGuide ? stylePrompt : undefined,
     });
 
     // Review & fix readability issues (navbar contrast, text visibility, etc.)
@@ -180,11 +219,35 @@ export async function POST(
       .where(eq(designs.id, design.id))
       .returning();
 
+    // Auto-set as style guide if no style guide exists yet
+    let isNowStyleGuide = updated.isStyleGuide;
+    if (!styleGuideCode && useStyleGuide) {
+      // Check if any style guide exists (including self)
+      const existingStyleGuide = await db.query.designs.findFirst({
+        where: and(
+          eq(designs.projectId, projectId),
+          eq(designs.isStyleGuide, true),
+          eq(designs.userId, userId),
+        ),
+        columns: { id: true },
+      });
+
+      if (!existingStyleGuide) {
+        await db
+          .update(designs)
+          .set({ isStyleGuide: true })
+          .where(eq(designs.id, design.id));
+        isNowStyleGuide = true;
+      }
+    }
+
     // Create a version snapshot
     await db.insert(designVersions).values({
       designId: design.id,
       html,
-      prompt: "Auto-generated",
+      prompt: forceRegenerate
+        ? `Regenerated${stylePrompt ? ` — ${stylePrompt}` : ""}`
+        : "Auto-generated",
     });
 
     // Increment usage
@@ -199,10 +262,11 @@ export async function POST(
         fonts: updated.fonts,
         colors: updated.colors,
         isStandalone: updated.isStandalone,
-        isStyleGuide: updated.isStyleGuide,
+        isStyleGuide: isNowStyleGuide,
         pageId: updated.pageId,
         createdAt: updated.createdAt.toISOString(),
         updatedAt: updated.updatedAt.toISOString(),
+        ...(previousHtml && { previousHtml }),
       },
       { status: 201 },
     );
