@@ -47,7 +47,7 @@ const PLAN_LIMITS: Record<Plan, PlanLimits> = {
     maxDesigns: Infinity,
     maxPagesPerProject: Infinity,
     maxDesignGenerationsPerDay: Infinity,
-    maxAiGenerationsPerMonth: Infinity,
+    maxAiGenerationsPerMonth: 200,
     canBuild: true,
     canEditCode: true,
     canPublish: true,

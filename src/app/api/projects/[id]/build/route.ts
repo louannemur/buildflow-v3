@@ -465,6 +465,8 @@ export async function POST(
 
     const readable = new ReadableStream({
       async start(controller) {
+        let savedAsComplete = false;
+        let savedFiles: BuildFile[] = [];
         try {
           const stream = anthropic.messages.stream({
             model: "claude-sonnet-4-20250514",
@@ -600,6 +602,8 @@ export async function POST(
             .update(buildOutputs)
             .set({ status: "complete", files: completedFiles })
             .where(eq(buildOutputs.id, buildOutputId));
+          savedAsComplete = true;
+          savedFiles = completedFiles;
 
           // ─── Build verification loop ─────────────────────────────
           // Skip for static HTML projects (no build step)
@@ -746,7 +750,12 @@ export async function POST(
               .where(eq(buildOutputs.id, buildOutputId));
           }
 
-          await incrementUsage(userId, "aiGenerations");
+          try {
+            await incrementUsage(userId, "aiGenerations");
+          } catch (usageErr) {
+            console.error("Failed to increment usage:", usageErr);
+            // Non-fatal — don't block the build result
+          }
 
           emit({
             type: "done",
@@ -762,19 +771,38 @@ export async function POST(
             error instanceof Error ? error.message : "Something went wrong.";
 
           try {
-            await db
-              .update(buildOutputs)
-              .set({ status: "failed", error: message })
-              .where(eq(buildOutputs.id, buildOutputId));
+            // Only mark as failed if we haven't already saved a complete build.
+            // Errors during verification or usage tracking shouldn't erase
+            // a successfully generated build.
+            if (!savedAsComplete) {
+              await db
+                .update(buildOutputs)
+                .set({ status: "failed", error: message })
+                .where(eq(buildOutputs.id, buildOutputId));
+            }
           } catch {
             // DB update failed, not critical
           }
 
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({ type: "error", message: `Build failed: ${message}` })}\n\n`,
-            ),
-          );
+          // If the build was already saved, still try to send the done event
+          // so the client gets the build ID for preview/publish/download.
+          if (savedAsComplete) {
+            try {
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({ type: "done", buildId: buildOutputId, files: savedFiles, fileCount: savedFiles.length })}\n\n`,
+                ),
+              );
+            } catch {
+              // Client may have disconnected
+            }
+          } else {
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ type: "error", message: `Build failed: ${message}` })}\n\n`,
+              ),
+            );
+          }
           controller.close();
         }
       },

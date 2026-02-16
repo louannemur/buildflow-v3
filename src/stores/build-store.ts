@@ -295,10 +295,22 @@ async function consumeStream(
       }
     }
 
-    // Stream ended without a done event
+    // Stream ended without a done event — recover by fetching the build ID
     if (allFiles.length > 0 && getState().building) {
+      let buildId = "";
+      try {
+        const res = await fetch(`/api/projects/${projectId}/build`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.output?.status === "complete" && data.output.id) {
+            buildId = data.output.id;
+          }
+        }
+      } catch {
+        // Fall through with empty ID
+      }
       set({
-        buildResult: { files: allFiles, id: "" },
+        buildResult: { files: allFiles, id: buildId },
         building: false,
       });
       abortController = null;
