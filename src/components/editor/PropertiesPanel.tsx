@@ -21,7 +21,6 @@ import {
 import { injectBfIds, stripBfIds } from "@/lib/design/inject-bf-ids";
 import {
   parseTailwindClasses,
-  buildClassString,
   swapClass,
   twClassToHex,
   hexToTwClass,
@@ -262,10 +261,11 @@ export function PropertiesPanel({
   }, [addingClass]);
 
   // Parse classes
+  const selectedClasses = selectedElement?.classes;
   const parsed = React.useMemo<ParsedStyles | null>(() => {
-    if (!selectedElement?.classes) return null;
-    return parseTailwindClasses(selectedElement.classes);
-  }, [selectedElement?.classes]);
+    if (!selectedClasses) return null;
+    return parseTailwindClasses(selectedClasses);
+  }, [selectedClasses]);
 
   if (!selectedElement) {
     return (
@@ -301,17 +301,6 @@ export function PropertiesPanel({
     if (updated !== selectedElement.classes) {
       mutateAndSave((code) =>
         updateElementClasses(code, selectedBfId, updated),
-      );
-    }
-  };
-
-  /** Replace entire class string from a parsed object */
-  const handleUpdateFromParsed = (newParsed: ParsedStyles) => {
-    if (!selectedBfId) return;
-    const newClasses = buildClassString(newParsed);
-    if (newClasses !== selectedElement.classes) {
-      mutateAndSave((code) =>
-        updateElementClasses(code, selectedBfId, newClasses),
       );
     }
   };
