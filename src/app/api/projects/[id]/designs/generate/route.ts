@@ -42,6 +42,7 @@ export async function POST(
     // Parse body
     const body = await req.json();
     const pageId = body.pageId;
+    const skipReview = body.skipReview === true;
 
     if (!pageId || typeof pageId !== "string") {
       return NextResponse.json(
@@ -168,7 +169,9 @@ export async function POST(
     });
 
     // Review & fix readability issues (navbar contrast, text visibility, etc.)
-    html = await reviewAndFixDesign(html);
+    if (!skipReview) {
+      html = await reviewAndFixDesign(html);
+    }
 
     // Save the generated HTML
     const [updated] = await db

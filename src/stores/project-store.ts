@@ -154,6 +154,17 @@ const initialState = {
 
 /* ─── Design batch runner ─────────────────────────────────────────────── */
 
+/** Fire-and-forget Claude review for a design (updates DB in background). */
+function reviewDesignInBackground(projectId: string, designId: string) {
+  fetch(`/api/projects/${projectId}/designs/review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ designId }),
+  }).catch(() => {
+    // Non-critical — design still has the Gemini output
+  });
+}
+
 async function runDesignBatch(
   projectId: string,
   pages: ProjectPage[],
@@ -178,22 +189,25 @@ async function runDesignBatch(
     set({ designGenCurrentPageName: page.title });
 
     try {
+      // Generate with Gemini only (skip Claude review for speed)
       const res = await fetch(
         `/api/projects/${projectId}/designs/generate`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pageId: page.id }),
+          body: JSON.stringify({ pageId: page.id, skipReview: true }),
         },
       );
 
       if (res.ok) {
         const design = await res.json();
-        // Only add to store if user is still viewing this project
+        // Show design immediately in store
         const s = useProjectStore.getState();
         if (s.project?.id === projectId) {
           s.addDesign(design);
         }
+        // Fire off Claude review in background while moving to next page
+        reviewDesignInBackground(projectId, design.id);
       }
     } catch {
       // Continue with remaining pages
