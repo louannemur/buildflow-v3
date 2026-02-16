@@ -60,7 +60,7 @@ function getInitials(name?: string | null) {
 
 function UserMenu() {
   const { user } = useCurrentUser();
-  const { theme } = useTheme();
+  const { theme, setTheme } = useTheme();
   const { updatePreference } = usePreferences();
   const router = useRouter();
 
@@ -107,15 +107,15 @@ function UserMenu() {
             Theme
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent>
-            <DropdownMenuItem onClick={() => updatePreference("theme", "light")}>
+            <DropdownMenuItem onClick={() => { setTheme("light"); updatePreference("theme", "light"); }}>
               <Sun />
               Light
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => updatePreference("theme", "dark")}>
+            <DropdownMenuItem onClick={() => { setTheme("dark"); updatePreference("theme", "dark"); }}>
               <Moon />
               Dark
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => updatePreference("theme", "system")}>
+            <DropdownMenuItem onClick={() => { setTheme("system"); updatePreference("theme", "system"); }}>
               <Monitor />
               System
             </DropdownMenuItem>

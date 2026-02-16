@@ -58,6 +58,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { useCurrentUser } from "@/hooks/useAuth";
+import { usePreferences } from "@/components/providers/preferences-provider";
 import { useAppStore } from "@/stores/app-store";
 import { useProjectStore } from "@/stores/project-store";
 import { cn } from "@/lib/utils";
@@ -129,6 +130,7 @@ function getInitials(name?: string | null) {
 function UserMenu() {
   const { user } = useCurrentUser();
   const { setTheme, theme } = useTheme();
+  const { updatePreference } = usePreferences();
   const router = useRouter();
 
   return (
@@ -174,15 +176,15 @@ function UserMenu() {
             Theme
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent>
-            <DropdownMenuItem onClick={() => setTheme("light")}>
+            <DropdownMenuItem onClick={() => { setTheme("light"); updatePreference("theme", "light"); }}>
               <Sun />
               Light
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setTheme("dark")}>
+            <DropdownMenuItem onClick={() => { setTheme("dark"); updatePreference("theme", "dark"); }}>
               <Moon />
               Dark
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setTheme("system")}>
+            <DropdownMenuItem onClick={() => { setTheme("system"); updatePreference("theme", "system"); }}>
               <Monitor />
               System
             </DropdownMenuItem>
