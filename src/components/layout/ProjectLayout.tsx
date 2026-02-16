@@ -433,10 +433,20 @@ export function ProjectLayout({
 
   const handleItemClick = useCallback(
     (step: ProjectStep, itemId: string) => {
-      router.push(`${projectBasePath}/${step}#${itemId}`);
+      if (step === "designs") {
+        router.push(`${projectBasePath}/designs/${itemId}`);
+      } else {
+        const targetPath = `${projectBasePath}/${step}`;
+        // If already on this page, set hash directly to trigger hashchange
+        if (pathname === targetPath || pathname.startsWith(targetPath + "/")) {
+          window.location.hash = itemId;
+        } else {
+          router.push(`${targetPath}#${itemId}`);
+        }
+      }
       setMobileOpen(false);
     },
-    [projectBasePath, router]
+    [projectBasePath, pathname, router]
   );
 
   const handleOverviewClick = useCallback(() => {

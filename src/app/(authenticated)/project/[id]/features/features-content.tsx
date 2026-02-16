@@ -105,18 +105,23 @@ export function FeaturesContent() {
 
   // Scroll to item from sidebar hash navigation
   useEffect(() => {
-    const hash = window.location.hash.slice(1);
-    if (!hash || loading) return;
-    const timeout = setTimeout(() => {
-      const el = document.getElementById(hash);
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-        el.classList.add("ring-2", "ring-primary", "rounded-xl");
-        setTimeout(() => el.classList.remove("ring-2", "ring-primary", "rounded-xl"), 2000);
-      }
-      window.history.replaceState(null, "", window.location.pathname);
-    }, 300);
-    return () => clearTimeout(timeout);
+    if (loading) return;
+    function scrollToHash() {
+      const hash = window.location.hash.slice(1);
+      if (!hash) return;
+      setTimeout(() => {
+        const el = document.getElementById(hash);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          el.classList.add("ring-2", "ring-primary", "rounded-xl");
+          setTimeout(() => el.classList.remove("ring-2", "ring-primary", "rounded-xl"), 2000);
+        }
+        window.history.replaceState(null, "", window.location.pathname);
+      }, 300);
+    }
+    scrollToHash();
+    window.addEventListener("hashchange", scrollToHash);
+    return () => window.removeEventListener("hashchange", scrollToHash);
   }, [loading]);
 
   // UI state
