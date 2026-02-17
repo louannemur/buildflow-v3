@@ -25,8 +25,8 @@ import { z } from "zod";
 const execAsync = promisify(exec);
 const MAX_FIX_ITERATIONS = 3;
 
-// Allow up to 5 minutes for build + verification on Vercel
-export const maxDuration = 300;
+// Allow up to 13 minutes for build + verification on Vercel Pro
+export const maxDuration = 800;
 
 /* ─── Validation ─────────────────────────────────────────────────────────── */
 
@@ -585,25 +585,156 @@ export async function POST(
           });
 
           // Wait for the stream to complete (or deadline abort)
+          let wasTruncated = false;
           try {
-            await stream.finalMessage();
+            const finalMsg = await stream.finalMessage();
+            // Check if the model hit max_tokens
+            if (finalMsg.stop_reason === "max_tokens") {
+              wasTruncated = true;
+            }
           } catch (streamErr) {
             // If we aborted due to deadline, continue with what we have
             if (!hitDeadline) throw streamErr;
+            wasTruncated = true;
           }
 
-          // Handle truncated last file (max_tokens reached or deadline abort)
+          // If we were mid-file when truncated, DON'T include the partial file
+          // Track it so continuation knows what to regenerate
+          let truncatedFilePath: string | null = null;
           if (currentFilePath) {
-            const content = accumulated
-              .slice(fileStartContentPos)
-              .trimEnd();
-            if (content) {
-              completedFiles.push({ path: currentFilePath, content });
+            truncatedFilePath = currentFilePath;
+            wasTruncated = true;
+            emit({
+              type: "file_truncated",
+              path: currentFilePath,
+              message: "File was incomplete — will attempt continuation",
+            });
+            currentFilePath = null;
+          }
+
+          // ─── Continuation: generate remaining files ────────────────
+          const MAX_CONTINUATIONS = 3;
+          let continuationAttempt = 0;
+
+          while (wasTruncated && continuationAttempt < MAX_CONTINUATIONS) {
+            // Check if we still have time (need at least 60s for a continuation)
+            const timeLeft = gracefulDeadline - Date.now();
+            if (timeLeft < 60_000) {
               emit({
-                type: "file_complete",
-                path: currentFilePath,
-                content,
+                type: "continuation_skipped",
+                message: "Not enough time for continuation — saving what we have",
               });
+              break;
+            }
+
+            continuationAttempt++;
+            emit({
+              type: "continuation_start",
+              attempt: continuationAttempt,
+              message: `Generating remaining files (attempt ${continuationAttempt})...`,
+            });
+
+            const completedPaths: string[] = completedFiles.map((f) => f.path);
+            let continuationPrompt: string;
+            if (truncatedFilePath) {
+              continuationPrompt = `You were generating a project but got cut off while writing "${truncatedFilePath}". The following files are ALREADY COMPLETE — do NOT regenerate them:\n\n${completedPaths.map((p) => `- ${p}`).join("\n")}\n\nPlease generate ONLY the remaining files, starting with "${truncatedFilePath}" (regenerate it fully). Use the same ===FILE: path=== / ===END FILE=== format. Do not include any explanation outside of file markers.`;
+            } else {
+              continuationPrompt = `You were generating a project but got cut off. The following files are ALREADY COMPLETE — do NOT regenerate them:\n\n${completedPaths.map((p) => `- ${p}`).join("\n")}\n\nPlease generate ONLY the remaining files that are still needed for a complete, buildable project. Use the same ===FILE: path=== / ===END FILE=== format. Do not include any explanation outside of file markers.`;
+            }
+
+            try {
+              const contResponse = await anthropic.messages.create({
+                model: "claude-opus-4-6",
+                max_tokens: 128000,
+                system: systemPrompt,
+                messages: [
+                  {
+                    role: "user",
+                    content:
+                      "Generate the complete project now. Output ALL files using the ===FILE: path=== format. No explanation outside of file markers. The project MUST compile and build successfully — double-check every file for valid syntax, correct imports, and proper configuration before outputting it. IMPORTANT: All npm packages must use their LATEST versions that are compatible with React 19. Do NOT use outdated package versions. Include an .npmrc file with legacy-peer-deps=true.",
+                  },
+                  {
+                    role: "assistant",
+                    content: accumulated,
+                  },
+                  {
+                    role: "user",
+                    content: continuationPrompt,
+                  },
+                ],
+              });
+
+              const contText: string =
+                contResponse.content[0].type === "text"
+                  ? contResponse.content[0].text
+                  : "";
+
+              const contFiles: BuildFile[] = parseFilesFromResponse(contText);
+
+              for (const file of contFiles) {
+                // Replace if the file was truncated, otherwise add new
+                const existingIdx = completedFiles.findIndex(
+                  (f) => f.path === file.path,
+                );
+                if (existingIdx >= 0) {
+                  completedFiles[existingIdx] = file;
+                } else {
+                  completedFiles.push(file);
+                }
+
+                emit({
+                  type: "file_complete",
+                  path: file.path,
+                  content: file.content,
+                });
+              }
+
+              // Persist progress after each continuation
+              db.update(buildOutputs)
+                .set({ files: [...completedFiles] })
+                .where(eq(buildOutputs.id, buildOutputId))
+                .catch(() => {});
+
+              // Check if this continuation was also truncated
+              if (contResponse.stop_reason === "max_tokens") {
+                // Update accumulated for next continuation context
+                accumulated += "\n" + contText;
+                truncatedFilePath = null;
+                // Check if the last file in contText was incomplete
+                const lastFileStart = contText.lastIndexOf("===FILE:");
+                const lastFileEnd = contText.lastIndexOf("===END FILE===");
+                if (lastFileStart > lastFileEnd) {
+                  const pathMatch: RegExpMatchArray | null = contText
+                    .slice(lastFileStart)
+                    .match(/===FILE:\s*(.+?)===\n/);
+                  if (pathMatch) {
+                    truncatedFilePath = pathMatch[1].trim();
+                    emit({
+                      type: "file_truncated",
+                      path: truncatedFilePath,
+                      message: "File was incomplete — will retry",
+                    });
+                  }
+                }
+                wasTruncated = true;
+              } else {
+                // Continuation completed normally
+                wasTruncated = false;
+              }
+
+              emit({
+                type: "continuation_complete",
+                attempt: continuationAttempt,
+                newFiles: contFiles.length,
+              });
+            } catch (contErr) {
+              console.error("Continuation error:", contErr);
+              emit({
+                type: "continuation_error",
+                attempt: continuationAttempt,
+                message: "Continuation failed — saving what we have",
+              });
+              break;
             }
           }
 
