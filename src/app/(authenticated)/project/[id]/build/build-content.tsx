@@ -297,7 +297,7 @@ export function BuildContent() {
         if (!res.ok) return;
         const data = await res.json();
 
-        if (data.output?.status === "complete" && data.output.files) {
+        if (data.output?.files?.length > 0) {
           // Tag the store with this project's ID so stale results are cleared on project switch
           useBuildStore.setState({ projectId: project!.id });
           setBuildResult({

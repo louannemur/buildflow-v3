@@ -109,7 +109,7 @@ export async function POST(
     }
 
     // Get latest complete build
-    const output = await db.query.buildOutputs.findFirst({
+    let output = await db.query.buildOutputs.findFirst({
       where: and(
         eq(buildOutputs.projectId, projectId),
         eq(buildOutputs.status, "complete"),
@@ -117,6 +117,22 @@ export async function POST(
       orderBy: [desc(buildOutputs.createdAt)],
       columns: { id: true, files: true },
     });
+
+    // Recovery: check for "generating" builds with saved files (function timeout)
+    if (!output?.files || output.files.length === 0) {
+      const pending = await db.query.buildOutputs.findFirst({
+        where: and(
+          eq(buildOutputs.projectId, projectId),
+          eq(buildOutputs.status, "generating"),
+        ),
+        orderBy: [desc(buildOutputs.createdAt)],
+        columns: { id: true, files: true },
+      });
+      if (pending?.files && pending.files.length > 0) {
+        await db.update(buildOutputs).set({ status: "complete" }).where(eq(buildOutputs.id, pending.id));
+        output = pending;
+      }
+    }
 
     if (!output?.files || output.files.length === 0) {
       return NextResponse.json(
@@ -422,15 +438,30 @@ export async function GET(
       return NextResponse.json({ published: false });
     }
 
-    // Check if the published build is current
-    const latestBuild = await db.query.buildOutputs.findFirst({
+    // Check if the published build is current (accept "generating" builds with files too)
+    let latestBuild = await db.query.buildOutputs.findFirst({
       where: and(
         eq(buildOutputs.projectId, projectId),
         eq(buildOutputs.status, "complete"),
       ),
       orderBy: [desc(buildOutputs.createdAt)],
-      columns: { id: true },
+      columns: { id: true, files: true },
     });
+
+    if (!latestBuild?.files || (latestBuild.files as { path: string }[]).length === 0) {
+      const pending = await db.query.buildOutputs.findFirst({
+        where: and(
+          eq(buildOutputs.projectId, projectId),
+          eq(buildOutputs.status, "generating"),
+        ),
+        orderBy: [desc(buildOutputs.createdAt)],
+        columns: { id: true, files: true },
+      });
+      if (pending?.files && (pending.files as { path: string }[]).length > 0) {
+        await db.update(buildOutputs).set({ status: "complete" }).where(eq(buildOutputs.id, pending.id));
+        latestBuild = pending;
+      }
+    }
 
     const isStale = latestBuild ? latestBuild.id !== site.buildOutputId : false;
 

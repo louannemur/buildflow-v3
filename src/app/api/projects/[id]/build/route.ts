@@ -532,6 +532,15 @@ export async function POST(
                     path: currentFilePath,
                     content,
                   });
+
+                  // Persist files to DB periodically — survives function timeouts
+                  if (completedFiles.length === 1 || completedFiles.length % 5 === 0) {
+                    db.update(buildOutputs)
+                      .set({ files: [...completedFiles] })
+                      .where(eq(buildOutputs.id, buildOutputId))
+                      .catch(() => {});
+                  }
+
                   emit({
                     type: "file_complete",
                     path: currentFilePath,

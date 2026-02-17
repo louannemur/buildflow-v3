@@ -104,13 +104,28 @@ export async function POST(
     }
 
     // Get latest completed build
-    const output = await db.query.buildOutputs.findFirst({
+    let output = await db.query.buildOutputs.findFirst({
       where: and(
         eq(buildOutputs.projectId, projectId),
         eq(buildOutputs.status, "complete"),
       ),
       orderBy: [desc(buildOutputs.createdAt)],
     });
+
+    // Recovery: check for "generating" builds with saved files (function timeout)
+    if (!output?.files || output.files.length === 0) {
+      const pending = await db.query.buildOutputs.findFirst({
+        where: and(
+          eq(buildOutputs.projectId, projectId),
+          eq(buildOutputs.status, "generating"),
+        ),
+        orderBy: [desc(buildOutputs.createdAt)],
+      });
+      if (pending?.files && (pending.files as { path: string; content: string }[]).length > 0) {
+        await db.update(buildOutputs).set({ status: "complete" }).where(eq(buildOutputs.id, pending.id));
+        output = pending;
+      }
+    }
 
     if (!output?.files || output.files.length === 0) {
       return NextResponse.json(
@@ -400,14 +415,30 @@ export async function GET(
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
-    const output = await db.query.buildOutputs.findFirst({
+    let output = await db.query.buildOutputs.findFirst({
       where: and(
         eq(buildOutputs.projectId, projectId),
         eq(buildOutputs.status, "complete"),
       ),
       orderBy: [desc(buildOutputs.createdAt)],
-      columns: { previewUrl: true, previewToken: true },
+      columns: { id: true, previewUrl: true, previewToken: true, files: true },
     });
+
+    // Recovery: check for "generating" builds with saved files (function timeout)
+    if (!output?.files || (output.files as { path: string; content: string }[]).length === 0) {
+      const pending = await db.query.buildOutputs.findFirst({
+        where: and(
+          eq(buildOutputs.projectId, projectId),
+          eq(buildOutputs.status, "generating"),
+        ),
+        orderBy: [desc(buildOutputs.createdAt)],
+        columns: { id: true, previewUrl: true, previewToken: true, files: true },
+      });
+      if (pending?.files && (pending.files as { path: string; content: string }[]).length > 0) {
+        await db.update(buildOutputs).set({ status: "complete" }).where(eq(buildOutputs.id, pending.id));
+        output = pending;
+      }
+    }
 
     if (output?.previewUrl && output?.previewToken) {
       return NextResponse.json({

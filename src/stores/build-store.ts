@@ -302,7 +302,7 @@ async function consumeStream(
         const res = await fetch(`/api/projects/${projectId}/build`);
         if (res.ok) {
           const data = await res.json();
-          if (data.output?.status === "complete" && data.output.id) {
+          if (data.output?.id && data.output.files?.length > 0) {
             buildId = data.output.id;
           }
         }
