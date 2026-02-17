@@ -307,22 +307,23 @@ export function PropertiesPanel({
   // ─── Mutation helpers ───────────────────────────────────────────
 
   const mutateAndSave = (mutator: (annotated: string) => string): boolean => {
-    if (isHtmlDocument(designCode)) {
+    // Always read the CURRENT source from the store, not the designCode prop,
+    // to avoid stale state when rapid changes happen before React re-renders.
+    const currentCode = useEditorStore.getState().source;
+    if (isHtmlDocument(currentCode)) {
       // HTML source already has bf-ids embedded — mutate directly, keep bf-ids
-      const updated = mutator(designCode);
-      console.log('[PropertiesPanel] mutateAndSave HTML path:', { changed: updated !== designCode, bfId: selectedBfId });
-      if (updated !== designCode) {
+      const updated = mutator(currentCode);
+      if (updated !== currentCode) {
         onCodeChange(updated);
         return true;
       }
       return false;
     } else {
       // Legacy JSX — inject bf-ids, mutate, strip
-      const { annotatedCode } = injectBfIds(designCode);
+      const { annotatedCode } = injectBfIds(currentCode);
       const updated = mutator(annotatedCode);
       const clean = stripBfIds(updated);
-      console.log('[PropertiesPanel] mutateAndSave JSX path:', { changed: clean !== designCode, bfId: selectedBfId });
-      if (clean !== designCode) {
+      if (clean !== currentCode) {
         onCodeChange(clean);
         return true;
       }
@@ -360,7 +361,6 @@ export function PropertiesPanel({
       }
 
       const updated = swapClass(currentClasses, freshOld, newClass);
-      console.log('[PropertiesPanel] handleSwapClass:', { currentClasses, freshOld, newClass, updated, changed: updated !== currentClasses });
       if (updated !== currentClasses) {
         newClassesStr = updated;
         return updateElementClasses(code, selectedBfId, updated);
@@ -417,7 +417,6 @@ export function PropertiesPanel({
       setEditingText(false);
       return;
     }
-    console.log('[PropertiesPanel] handleTextChange:', { bfId: selectedBfId, oldText: selectedElement.textContent, newText: textValue });
     const applied = mutateAndSave((code) => updateElementText(code, selectedBfId, textValue, selectedElement.textContent));
 
     // Immediately update selectedElement so the display doesn't revert to old text

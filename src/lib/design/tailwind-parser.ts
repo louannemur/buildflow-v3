@@ -79,7 +79,7 @@ const PATTERNS: Record<string, RegExp> = {
   // Typography
   fontFamily: /^font-(sans|serif|mono|\[.+\])$/,
   fontWeight: /^font-(thin|extralight|light|normal|medium|semibold|bold|extrabold|black)$/,
-  fontSize: /^text-(xs|sm|base|lg|xl|2xl|3xl|4xl|5xl|6xl|7xl|8xl|9xl|\[.+\])$/,
+  fontSize: /^text-(xs|sm|base|lg|xl|2xl|3xl|4xl|5xl|6xl|7xl|8xl|9xl|\[\d[^\]]*\])$/,
   lineHeight: /^leading-(.+)$/,
   letterSpacing: /^tracking-(.+)$/,
   textAlign: /^text-(left|center|right|justify|start|end)$/,
@@ -105,6 +105,24 @@ export const FONT_WEIGHTS = [
 
 export const FONT_SIZES = [
   "xs", "sm", "base", "lg", "xl", "2xl", "3xl", "4xl", "5xl", "6xl",
+];
+
+export const LINE_HEIGHTS = [
+  { label: "None", value: "none" },
+  { label: "Tight", value: "tight" },
+  { label: "Snug", value: "snug" },
+  { label: "Normal", value: "normal" },
+  { label: "Relaxed", value: "relaxed" },
+  { label: "Loose", value: "loose" },
+];
+
+export const LETTER_SPACINGS = [
+  { label: "Tighter", value: "tighter" },
+  { label: "Tight", value: "tight" },
+  { label: "Normal", value: "normal" },
+  { label: "Wide", value: "wide" },
+  { label: "Wider", value: "wider" },
+  { label: "Widest", value: "widest" },
 ];
 
 export const SHADOW_OPTIONS = [
