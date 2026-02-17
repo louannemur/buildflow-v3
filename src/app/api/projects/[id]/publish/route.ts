@@ -392,9 +392,11 @@ export async function POST(
       deploymentId: deployment.id,
     });
   } catch (error) {
-    console.error("Publish error:", error);
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error("Publish POST error:", msg);
+    console.error("Publish stack:", error instanceof Error ? error.stack : "no stack");
     return NextResponse.json(
-      { error: "Something went wrong. Please try again." },
+      { error: `Publishing failed: ${msg}` },
       { status: 500 },
     );
   }
@@ -474,9 +476,10 @@ export async function GET(
       isStale,
     });
   } catch (error) {
-    console.error("Publish GET error:", error);
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error("Publish GET error:", msg);
     return NextResponse.json(
-      { error: "Something went wrong." },
+      { error: `Publish status check failed: ${msg}` },
       { status: 500 },
     );
   }
