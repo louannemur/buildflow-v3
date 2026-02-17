@@ -919,7 +919,8 @@ export function BuildContent() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setBuildResult(null)}
+              onClick={handleBuild}
+              disabled={building}
             >
               <RotateCcw className="size-3.5" />
               Rebuild

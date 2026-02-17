@@ -241,6 +241,33 @@ async function consumeStream(
               break;
             }
 
+            case "file_truncated":
+              set({
+                verifyStatus: `File incomplete: ${event.path} — continuing...`,
+                currentStreamingPath: null,
+                currentStreamingContent: "",
+              });
+              break;
+
+            case "continuation_start":
+              set({
+                verifyStatus: event.message ?? "Generating remaining files...",
+              });
+              break;
+
+            case "continuation_complete":
+              set({
+                verifyStatus: `Continuation added ${event.newFiles} files`,
+              });
+              break;
+
+            case "continuation_error":
+            case "continuation_skipped":
+              set({
+                verifyStatus: event.message ?? "Saving what we have...",
+              });
+              break;
+
             case "verify":
               set({ verifyStatus: event.message ?? "Verifying build..." });
               break;
