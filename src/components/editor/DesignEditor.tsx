@@ -2,7 +2,8 @@
 
 import { useEffect, useCallback, useState, useRef } from "react";
 import { AnimatePresence } from "framer-motion";
-import { useEditorStore } from "@/lib/editor/store";
+import { useEditorStore, getCleanSource } from "@/lib/editor/store";
+import { stripBfIds } from "@/lib/design/inject-bf-ids";
 import { Canvas } from "./canvas";
 import { LayersPanel } from "./LayersPanel";
 import { PropertiesPanel } from "./PropertiesPanel";
@@ -361,11 +362,10 @@ export function DesignEditor({
           editType: "element",
         });
 
-        const newSource = useEditorStore.getState().source;
         await fetch(`/api/designs/${designId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ html: newSource }),
+          body: JSON.stringify({ html: getCleanSource() }),
         });
       } else {
         setStreamingToIframe(false);
@@ -393,11 +393,10 @@ export function DesignEditor({
           editType: "add-section",
         });
 
-        const newSource = useEditorStore.getState().source;
         await fetch(`/api/designs/${designId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ html: newSource }),
+          body: JSON.stringify({ html: getCleanSource() }),
         });
       } else {
         setStreamingToIframe(false);
@@ -415,11 +414,10 @@ export function DesignEditor({
       deleteElement(bfId);
 
       // Save after deletion
-      const newSource = useEditorStore.getState().source;
       fetch(`/api/designs/${designId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ html: newSource }),
+        body: JSON.stringify({ html: getCleanSource() }),
       });
     },
     [designId, deleteElement],
@@ -433,7 +431,7 @@ export function DesignEditor({
       fetch(`/api/designs/${designId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ html: newCode }),
+        body: JSON.stringify({ html: stripBfIds(newCode) }),
       });
     },
     [designId, updateSource],

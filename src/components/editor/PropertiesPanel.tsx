@@ -20,6 +20,7 @@ import {
   updateElementAttribute,
 } from "@/lib/design/code-mutator";
 import { injectBfIds, stripBfIds } from "@/lib/design/inject-bf-ids";
+import { isHtmlDocument } from "@/lib/design/preview-transform";
 import {
   parseTailwindClasses,
   classifyTwClass,
@@ -299,10 +300,17 @@ export function PropertiesPanel({
   // ─── Mutation helpers ───────────────────────────────────────────
 
   const mutateAndSave = (mutator: (annotated: string) => string) => {
-    const { annotatedCode } = injectBfIds(designCode);
-    const updated = mutator(annotatedCode);
-    const clean = stripBfIds(updated);
-    if (clean !== designCode) onCodeChange(clean);
+    if (isHtmlDocument(designCode)) {
+      // HTML source already has bf-ids embedded — mutate directly, keep bf-ids
+      const updated = mutator(designCode);
+      if (updated !== designCode) onCodeChange(updated);
+    } else {
+      // Legacy JSX — inject bf-ids, mutate, strip
+      const { annotatedCode } = injectBfIds(designCode);
+      const updated = mutator(annotatedCode);
+      const clean = stripBfIds(updated);
+      if (clean !== designCode) onCodeChange(clean);
+    }
   };
 
   /** Replace a single class with a new value (or add/remove).

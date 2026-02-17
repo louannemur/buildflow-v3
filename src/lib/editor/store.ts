@@ -9,7 +9,7 @@ import {
   addClassToElement,
   removeClassFromElement,
 } from "@/lib/design/code-mutator";
-import { injectBfIds, stripBfIds } from "@/lib/design/inject-bf-ids";
+import { injectBfIds, stripBfIds, ensureBfIds } from "@/lib/design/inject-bf-ids";
 import { isHtmlDocument } from "@/lib/design/preview-transform";
 
 /* ─── Constants ──────────────────────────────────────────────────────────── */
@@ -40,7 +40,7 @@ export interface EditorElement {
 }
 
 export interface EditorState {
-  // Source of truth (clean code without bf-ids)
+  // Source of truth (HTML docs include bf-ids for editor targeting)
   source: string;
   designId: string;
   projectId: string | null;
@@ -156,8 +156,21 @@ const initialState = {
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
 
+/**
+ * Ensure bf-ids are embedded in HTML source.
+ * For HTML documents, bf-ids must live in the source so the iframe and
+ * the properties panel share the same element identifiers.
+ * For legacy JSX, bf-ids are injected/stripped on the fly.
+ */
+function sourceWithBfIds(source: string): string {
+  if (isHtmlDocument(source) && !source.includes('data-bf-id=')) {
+    return ensureBfIds(source);
+  }
+  return source;
+}
+
 /** Apply a mutation to the source code.
- * For HTML documents (which already contain bf-ids), mutate directly.
+ * For HTML documents (which contain bf-ids), mutate directly.
  * For legacy JSX (which stores clean code), inject bf-ids first, mutate, then strip.
  */
 function mutateCode(
@@ -181,7 +194,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   init: (opts) => {
     set({
-      source: opts.source,
+      source: sourceWithBfIds(opts.source),
       designId: opts.designId,
       projectId: opts.projectId ?? null,
       pageId: opts.pageId ?? null,
@@ -200,7 +213,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   updateSource: (source) => {
     const current = get().source;
     set({
-      source,
+      source: sourceWithBfIds(source),
       undoStack: [...get().undoStack.slice(-MAX_UNDO_STACK + 1), current],
       redoStack: [],
     });
@@ -370,3 +383,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   reset: () => set(initialState),
 }));
+
+/** Return the editor source with bf-id attributes stripped (for DB saves, code display). */
+export function getCleanSource(): string {
+  const source = useEditorStore.getState().source;
+  return isHtmlDocument(source) ? stripBfIds(source) : source;
+}
