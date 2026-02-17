@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useEditorStore } from "@/lib/editor/store";
 import {
+  findElementInCode,
   updateElementClasses,
   addClassToElement,
   removeClassFromElement,
@@ -272,10 +273,10 @@ export function PropertiesPanel({
     if (addingClass && addClassRef.current) addClassRef.current.focus();
   }, [addingClass]);
 
-  // Parse classes
+  // Parse classes — use == null so empty string "" is still parsed (not treated as falsy)
   const selectedClasses = selectedElement?.classes;
   const parsed = React.useMemo<ParsedStyles | null>(() => {
-    if (!selectedClasses) return null;
+    if (selectedClasses == null) return null;
     return parseTailwindClasses(selectedClasses);
   }, [selectedClasses]);
 
@@ -303,18 +304,23 @@ export function PropertiesPanel({
     if (clean !== designCode) onCodeChange(clean);
   };
 
-  /** Replace a single class with a new value (or add/remove) */
+  /** Replace a single class with a new value (or add/remove).
+   *  Reads the CURRENT classes from the live source code (not the stale
+   *  selectedElement which lags behind due to async iframe tree updates). */
   const handleSwapClass = (
     oldClass: string | null,
     newClass: string | null,
   ) => {
-    if (!selectedBfId || !selectedElement.classes) return;
-    const updated = swapClass(selectedElement.classes, oldClass, newClass);
-    if (updated !== selectedElement.classes) {
-      mutateAndSave((code) =>
-        updateElementClasses(code, selectedBfId, updated),
-      );
-    }
+    if (!selectedBfId) return;
+    mutateAndSave((code) => {
+      const loc = findElementInCode(code, selectedBfId);
+      const currentClasses = loc?.classes ?? "";
+      const updated = swapClass(currentClasses, oldClass, newClass);
+      if (updated !== currentClasses) {
+        return updateElementClasses(code, selectedBfId, updated);
+      }
+      return code;
+    });
   };
 
   const handleRemoveClass = (cls: string) => {
@@ -519,26 +525,24 @@ export function PropertiesPanel({
               readOnly
             />
           </div>
-          {(parsed?.width || parsed?.height || parsed?.maxWidth || parsed?.maxHeight) && (
+          {!isSvgElement && (
             <div className="mt-2 grid grid-cols-2 gap-2">
-              {parsed?.width && (
-                <PropInput
-                  label="Width"
-                  value={parsed.width.replace("w-", "")}
-                  onChange={(v) =>
-                    handleSwapClass(parsed.width, v ? `w-${v}` : null)
-                  }
-                />
-              )}
-              {parsed?.height && (
-                <PropInput
-                  label="Height"
-                  value={parsed.height.replace("h-", "")}
-                  onChange={(v) =>
-                    handleSwapClass(parsed.height, v ? `h-${v}` : null)
-                  }
-                />
-              )}
+              <PropInput
+                label="Width"
+                value={parsed?.width ? parsed.width.replace("w-", "") : ""}
+                placeholder="auto"
+                onChange={(v) =>
+                  handleSwapClass(parsed?.width ?? null, v ? `w-${v}` : null)
+                }
+              />
+              <PropInput
+                label="Height"
+                value={parsed?.height ? parsed.height.replace("h-", "") : ""}
+                placeholder="auto"
+                onChange={(v) =>
+                  handleSwapClass(parsed?.height ?? null, v ? `h-${v}` : null)
+                }
+              />
               {parsed?.maxWidth && (
                 <PropInput
                   label="Max Width"
