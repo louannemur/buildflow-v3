@@ -11,10 +11,13 @@ import { SelectionOverlay } from "./SelectionOverlay";
 
 interface CanvasProps {
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
+  onMoveElement?: (bfId: string, targetBfId: string, position: 'before' | 'after') => void;
 }
 
-export function Canvas({ iframeRef }: CanvasProps) {
+export function Canvas({ iframeRef, onMoveElement }: CanvasProps) {
   const readyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reloadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevBlobUrlRef = useRef<string | null>(null);
   const source = useEditorStore((s) => s.source);
   const mode = useEditorStore((s) => s.mode);
   const breakpoint = useEditorStore((s) => s.breakpoint);
@@ -35,6 +38,7 @@ export function Canvas({ iframeRef }: CanvasProps) {
 
   // ─── Scale-to-fit (width only) ─────────────────────────────────────────
   const containerRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [containerH, setContainerH] = useState(600);
 
@@ -56,6 +60,113 @@ export function Canvas({ iframeRef }: CanvasProps) {
     return () => ro.disconnect();
   }, [recalcScale]);
 
+  // ─── Drag-to-reorder state ─────────────────────────────────────────────
+  const [isDragging, setIsDragging] = useState(false);
+  const [dropIndicator, setDropIndicator] = useState<{ y: number; width: number; left: number } | null>(null);
+  const dropTargetRef = useRef<{ bfId: string; position: 'before' | 'after' } | null>(null);
+  const dragBfIdRef = useRef<string | null>(null);
+
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    const draggedEl = useEditorStore.getState().selectedElement;
+    if (!draggedEl) return;
+
+    e.preventDefault();
+    setIsDragging(true);
+    dragBfIdRef.current = draggedEl.bfId;
+
+    const handleMouseMove = (ev: MouseEvent) => {
+      const inner = innerRef.current;
+      if (!inner) return;
+
+      // Convert mouse position to iframe coordinates
+      const rect = inner.getBoundingClientRect();
+      const iframeY = (ev.clientY - rect.top) / scale;
+
+      const state = useEditorStore.getState();
+      const dragged = state.elementTree.find((el) => el.bfId === dragBfIdRef.current);
+      if (!dragged) return;
+
+      // Find siblings (same parent, exclude dragged element)
+      const siblings = state.elementTree.filter(
+        (el) => el.parentBfId === dragged.parentBfId && el.bfId !== dragged.bfId,
+      );
+      siblings.sort((a, b) => a.rect.top - b.rect.top);
+
+      if (siblings.length === 0) {
+        dropTargetRef.current = null;
+        setDropIndicator(null);
+        return;
+      }
+
+      // Find drop position based on cursor Y
+      let target: EditorElement | null = null;
+      let position: 'before' | 'after' = 'before';
+
+      for (const sibling of siblings) {
+        const midY = sibling.rect.top + sibling.rect.height / 2;
+        if (iframeY < midY) {
+          target = sibling;
+          position = 'before';
+          break;
+        }
+      }
+
+      if (!target) {
+        target = siblings[siblings.length - 1];
+        position = 'after';
+      }
+
+      // Check if this would result in no change
+      const allChildren = state.elementTree
+        .filter((el) => el.parentBfId === dragged.parentBfId)
+        .sort((a, b) => a.rect.top - b.rect.top);
+      const draggedIndex = allChildren.findIndex((el) => el.bfId === dragged.bfId);
+      const targetIndex = allChildren.findIndex((el) => el.bfId === target!.bfId);
+
+      const isNoOp =
+        (position === 'before' && draggedIndex === targetIndex - 1) ||
+        (position === 'after' && draggedIndex === targetIndex + 1) ||
+        (position === 'before' && draggedIndex === 0 && targetIndex === 0) ||
+        (position === 'after' && draggedIndex === allChildren.length - 1 && targetIndex === allChildren.length - 1);
+
+      if (isNoOp) {
+        dropTargetRef.current = null;
+        setDropIndicator(null);
+        return;
+      }
+
+      dropTargetRef.current = { bfId: target.bfId, position };
+
+      // Calculate indicator line position
+      const lineY = position === 'before' ? target.rect.top : target.rect.top + target.rect.height;
+      const parentEl = state.elementTree.find((el) => el.bfId === dragged.parentBfId);
+      const lineWidth = parentEl ? parentEl.rect.width : target.rect.width;
+      const lineLeft = parentEl ? parentEl.rect.left : target.rect.left;
+
+      setDropIndicator({ y: lineY, width: lineWidth, left: lineLeft });
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+
+      setIsDragging(false);
+      setDropIndicator(null);
+
+      const bfId = dragBfIdRef.current;
+      const drop = dropTargetRef.current;
+      dragBfIdRef.current = null;
+      dropTargetRef.current = null;
+
+      if (bfId && drop && onMoveElement) {
+        onMoveElement(bfId, drop.bfId, drop.position);
+      }
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  }, [scale, onMoveElement]);
+
   // Build and write preview to iframe
   useEffect(() => {
     if (!source || !iframeRef.current) return;
@@ -67,59 +178,79 @@ export function Canvas({ iframeRef }: CanvasProps) {
       readyTimeoutRef.current = null;
     }
 
-    try {
-      // Generate complete preview HTML with optional bridge for design mode
-      let html: string;
-      const trimmedSource = source.trim();
-      const lowerSource = trimmedSource.toLowerCase();
+    const doReload = () => {
+      try {
+        const iframe = iframeRef.current;
+        if (!iframe) return;
 
-      if (isHtmlDocument(source)) {
-        // Full HTML document — render directly
-        html = prepareHtmlForPreview(source, { enableBridge: mode === "design" });
-      } else if (
-        lowerSource.includes('<!doctype') || lowerSource.includes('<html')
-      ) {
-        // HTML document with leading content — extract and render
-        const doctypeIdx = lowerSource.indexOf('<!doctype');
-        const htmlIdx = lowerSource.indexOf('<html');
-        const start = doctypeIdx !== -1 ? doctypeIdx : htmlIdx;
-        html = prepareHtmlForPreview(trimmedSource.slice(start), { enableBridge: mode === "design" });
-      } else if (
-        trimmedSource.startsWith('<') &&
-        !/^(import\s|'use client'|"use client"|export\s|function\s|const\s|class\s)/.test(trimmedSource)
-      ) {
-        // HTML fragment (e.g. from corrupted element edit) — wrap in document
-        const wrapped = `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width, initial-scale=1.0">\n<script src="https://cdn.tailwindcss.com"><\/script>\n</head>\n<body>\n${source}\n</body>\n</html>`;
-        html = prepareHtmlForPreview(wrapped, { enableBridge: mode === "design" });
-      } else {
-        // Legacy React/JSX code
-        html = generatePreviewHtml(source, { enableBridge: mode === "design" });
-      }
+        // Generate complete preview HTML with optional bridge for design mode
+        let html: string;
+        const trimmedSource = source.trim();
+        const lowerSource = trimmedSource.toLowerCase();
 
-      // Inject watermark for free plan
-      if (isFreePlan) {
-        const watermark = `<div style="position:fixed;bottom:12px;right:12px;z-index:99999;pointer-events:none;background:rgba(0,0,0,0.6);color:#fff;font-size:11px;font-weight:500;padding:4px 10px;border-radius:999px;font-family:system-ui,sans-serif;letter-spacing:0.01em;">Made with Calypso</div>`;
-        html = html.replace("</body>", watermark + "</body>");
-      }
-
-      const blob = new Blob([html], { type: "text/html" });
-      const url = URL.createObjectURL(blob);
-      iframeRef.current.src = url;
-
-      readyTimeoutRef.current = setTimeout(() => {
-        // Preview timeout - could show a warning
-      }, 10000);
-
-      return () => {
-        URL.revokeObjectURL(url);
-        if (readyTimeoutRef.current) {
-          clearTimeout(readyTimeoutRef.current);
-          readyTimeoutRef.current = null;
+        if (isHtmlDocument(source)) {
+          // Full HTML document — render directly
+          html = prepareHtmlForPreview(source, { enableBridge: mode === "design" });
+        } else if (
+          lowerSource.includes('<!doctype') || lowerSource.includes('<html')
+        ) {
+          // HTML document with leading content — extract and render
+          const doctypeIdx = lowerSource.indexOf('<!doctype');
+          const htmlIdx = lowerSource.indexOf('<html');
+          const start = doctypeIdx !== -1 ? doctypeIdx : htmlIdx;
+          html = prepareHtmlForPreview(trimmedSource.slice(start), { enableBridge: mode === "design" });
+        } else if (
+          trimmedSource.startsWith('<') &&
+          !/^(import\s|'use client'|"use client"|export\s|function\s|const\s|class\s)/.test(trimmedSource)
+        ) {
+          // HTML fragment (e.g. from corrupted element edit) — wrap in document
+          const wrapped = `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width, initial-scale=1.0">\n<script src="https://cdn.tailwindcss.com"><\/script>\n</head>\n<body>\n${source}\n</body>\n</html>`;
+          html = prepareHtmlForPreview(wrapped, { enableBridge: mode === "design" });
+        } else {
+          // Legacy React/JSX code
+          html = generatePreviewHtml(source, { enableBridge: mode === "design" });
         }
-      };
-    } catch (err) {
-      console.error("Preview error:", err);
+
+        // Inject watermark for free plan
+        if (isFreePlan) {
+          const watermark = `<div style="position:fixed;bottom:12px;right:12px;z-index:99999;pointer-events:none;background:rgba(0,0,0,0.6);color:#fff;font-size:11px;font-weight:500;padding:4px 10px;border-radius:999px;font-family:system-ui,sans-serif;letter-spacing:0.01em;">Made with Calypso</div>`;
+          html = html.replace("</body>", watermark + "</body>");
+        }
+
+        // Revoke previous blob URL
+        if (prevBlobUrlRef.current) {
+          URL.revokeObjectURL(prevBlobUrlRef.current);
+        }
+
+        const blob = new Blob([html], { type: "text/html" });
+        const url = URL.createObjectURL(blob);
+        prevBlobUrlRef.current = url;
+        iframe.src = url;
+
+        readyTimeoutRef.current = setTimeout(() => {
+          // Preview timeout - could show a warning
+        }, 10000);
+      } catch (err) {
+        console.error("Preview error:", err);
+      }
+    };
+
+    // Debounce to prevent thrashing from rapid source changes (e.g. undo spam)
+    if (reloadDebounceRef.current) {
+      clearTimeout(reloadDebounceRef.current);
     }
+    reloadDebounceRef.current = setTimeout(doReload, 150);
+
+    return () => {
+      if (reloadDebounceRef.current) {
+        clearTimeout(reloadDebounceRef.current);
+        reloadDebounceRef.current = null;
+      }
+      if (readyTimeoutRef.current) {
+        clearTimeout(readyTimeoutRef.current);
+        readyTimeoutRef.current = null;
+      }
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- iframeRef is a stable ref
   }, [source, mode, isFreePlan, isStreamingToIframe]);
 
@@ -187,6 +318,18 @@ export function Canvas({ iframeRef }: CanvasProps) {
           }
           if (iframeRef.current?.contentWindow) {
             iframeRef.current.contentWindow.postMessage({ type: "GET_TREE" }, "*");
+            // Restore scroll to selected element after reload to prevent jump-to-top
+            const selId = useEditorStore.getState().selectedBfId;
+            if (selId) {
+              setTimeout(() => {
+                if (iframeRef.current?.contentWindow) {
+                  iframeRef.current.contentWindow.postMessage(
+                    { type: "SCROLL_TO", bfId: selId },
+                    "*",
+                  );
+                }
+              }, 50);
+            }
           }
           break;
 
@@ -250,6 +393,7 @@ export function Canvas({ iframeRef }: CanvasProps) {
       >
         {/* Inner: renders at full size, visually scaled down */}
         <div
+          ref={innerRef}
           className={cn(
             "relative overflow-hidden rounded-lg border border-border/60 bg-white shadow-sm transition-all duration-300",
             mode === "preview" && "shadow-none",
@@ -267,13 +411,27 @@ export function Canvas({ iframeRef }: CanvasProps) {
                 ref={iframeRef}
                 title="Design canvas"
                 className="block h-full w-full border-none"
-                sandbox="allow-scripts"
+                sandbox="allow-scripts allow-same-origin"
                 tabIndex={-1}
               />
               {mode === "design" && (
                 <SelectionOverlay
                   selectedElement={selectedElement}
                   hoveredElement={hoveredElement}
+                  onDragStart={handleDragStart}
+                  dropIndicator={dropIndicator}
+                />
+              )}
+              {/* Transparent overlay to capture mouse events during drag (iframe blocks them otherwise) */}
+              {isDragging && (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    zIndex: 50,
+                    cursor: "grabbing",
+                    userSelect: "none",
+                  }}
                 />
               )}
             </>

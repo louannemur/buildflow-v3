@@ -30,6 +30,8 @@ import {
   extractPaddingValue,
   FONT_WEIGHTS,
   FONT_SIZES,
+  LINE_HEIGHTS,
+  LETTER_SPACINGS,
   SHADOW_OPTIONS,
   type ParsedStyles,
 } from "@/lib/design/tailwind-parser";
@@ -71,6 +73,7 @@ function PropInput({
   className?: string;
 }) {
   const [local, setLocal] = React.useState(value);
+  const submittedRef = React.useRef(false);
   React.useEffect(() => setLocal(value), [value]);
 
   return (
@@ -84,10 +87,16 @@ function PropInput({
         value={local}
         onChange={(e) => setLocal(e.target.value)}
         onBlur={() => {
+          // Skip if Enter already triggered onChange (prevents double-call)
+          if (submittedRef.current) {
+            submittedRef.current = false;
+            return;
+          }
           if (onChange && local !== value) onChange(local);
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter" && onChange) {
+            submittedRef.current = true;
             onChange(local);
             (e.target as HTMLInputElement).blur();
           }
@@ -113,9 +122,7 @@ function ColorInput({
   hex: string | null;
   onChange: (hex: string) => void;
 }) {
-  const colorRef = React.useRef<HTMLInputElement>(null);
-  const displayHex = hex || "";
-  const [localHex, setLocalHex] = React.useState(displayHex);
+  const [localHex, setLocalHex] = React.useState(hex || "");
   React.useEffect(() => setLocalHex(hex || ""), [hex]);
 
   return (
@@ -126,22 +133,22 @@ function ColorInput({
         </label>
       )}
       <div className="flex items-center gap-1.5">
-        <button
-          type="button"
-          className="size-7 shrink-0 rounded border border-border/60"
-          style={{ backgroundColor: hex || "transparent" }}
-          onClick={() => colorRef.current?.click()}
-        />
-        <input
-          ref={colorRef}
-          type="color"
-          className="invisible absolute size-0"
-          value={hex || "#000000"}
-          onChange={(e) => {
-            setLocalHex(e.target.value);
-            onChange(e.target.value);
-          }}
-        />
+        {/* Color swatch with native input overlaid (opacity-0) for Safari compatibility */}
+        <div className="relative size-7 shrink-0">
+          <div
+            className="size-7 rounded border border-border/60"
+            style={{ backgroundColor: hex || "transparent" }}
+          />
+          <input
+            type="color"
+            className="absolute inset-0 cursor-pointer opacity-0"
+            value={hex || "#000000"}
+            onChange={(e) => {
+              setLocalHex(e.target.value);
+              onChange(e.target.value);
+            }}
+          />
+        </div>
         <input
           type="text"
           className="h-7 w-full min-w-0 rounded border border-border/60 bg-muted/30 px-2 text-xs uppercase text-foreground focus:border-primary/50 focus:outline-none"
@@ -299,17 +306,27 @@ export function PropertiesPanel({
 
   // ─── Mutation helpers ───────────────────────────────────────────
 
-  const mutateAndSave = (mutator: (annotated: string) => string) => {
+  const mutateAndSave = (mutator: (annotated: string) => string): boolean => {
     if (isHtmlDocument(designCode)) {
       // HTML source already has bf-ids embedded — mutate directly, keep bf-ids
       const updated = mutator(designCode);
-      if (updated !== designCode) onCodeChange(updated);
+      console.log('[PropertiesPanel] mutateAndSave HTML path:', { changed: updated !== designCode, bfId: selectedBfId });
+      if (updated !== designCode) {
+        onCodeChange(updated);
+        return true;
+      }
+      return false;
     } else {
       // Legacy JSX — inject bf-ids, mutate, strip
       const { annotatedCode } = injectBfIds(designCode);
       const updated = mutator(annotatedCode);
       const clean = stripBfIds(updated);
-      if (clean !== designCode) onCodeChange(clean);
+      console.log('[PropertiesPanel] mutateAndSave JSX path:', { changed: clean !== designCode, bfId: selectedBfId });
+      if (clean !== designCode) {
+        onCodeChange(clean);
+        return true;
+      }
+      return false;
     }
   };
 
@@ -323,7 +340,8 @@ export function PropertiesPanel({
     newClass: string | null,
   ) => {
     if (!selectedBfId) return;
-    mutateAndSave((code) => {
+    let newClassesStr: string | null = null;
+    const applied = mutateAndSave((code) => {
       const loc = findElementInCode(code, selectedBfId);
       const currentClasses = loc?.classes ?? "";
 
@@ -342,27 +360,54 @@ export function PropertiesPanel({
       }
 
       const updated = swapClass(currentClasses, freshOld, newClass);
+      console.log('[PropertiesPanel] handleSwapClass:', { currentClasses, freshOld, newClass, updated, changed: updated !== currentClasses });
       if (updated !== currentClasses) {
+        newClassesStr = updated;
         return updateElementClasses(code, selectedBfId, updated);
       }
       return code;
     });
+
+    // Immediately update selectedElement so the Properties Panel doesn't revert
+    if (applied && newClassesStr && selectedElement) {
+      useEditorStore.setState({
+        selectedElement: { ...selectedElement, classes: newClassesStr },
+      });
+    }
   };
 
   const handleRemoveClass = (cls: string) => {
     if (!selectedBfId) return;
-    mutateAndSave((code) => removeClassFromElement(code, selectedBfId, cls));
+    const applied = mutateAndSave((code) => removeClassFromElement(code, selectedBfId, cls));
+    if (applied && selectedElement) {
+      const newClasses = selectedElement.classes
+        .split(/\s+/)
+        .filter((c) => c !== cls)
+        .join(" ");
+      useEditorStore.setState({
+        selectedElement: { ...selectedElement, classes: newClasses },
+      });
+    }
   };
 
   const handleAddClass = () => {
     if (!selectedBfId || !newClassValue.trim()) return;
     const classesToAdd = newClassValue.trim().split(/\s+/);
-    mutateAndSave((code) => {
+    const applied = mutateAndSave((code) => {
       let result = code;
       for (const cls of classesToAdd)
         result = addClassToElement(result, selectedBfId, cls);
       return result;
     });
+    if (applied && selectedElement) {
+      const newClasses = [
+        ...selectedElement.classes.split(/\s+/).filter(Boolean),
+        ...classesToAdd,
+      ].join(" ");
+      useEditorStore.setState({
+        selectedElement: { ...selectedElement, classes: newClasses },
+      });
+    }
     setNewClassValue("");
     setAddingClass(false);
   };
@@ -372,7 +417,15 @@ export function PropertiesPanel({
       setEditingText(false);
       return;
     }
-    mutateAndSave((code) => updateElementText(code, selectedBfId, textValue));
+    console.log('[PropertiesPanel] handleTextChange:', { bfId: selectedBfId, oldText: selectedElement.textContent, newText: textValue });
+    const applied = mutateAndSave((code) => updateElementText(code, selectedBfId, textValue, selectedElement.textContent));
+
+    // Immediately update selectedElement so the display doesn't revert to old text
+    if (applied && selectedElement) {
+      useEditorStore.setState({
+        selectedElement: { ...selectedElement, textContent: textValue },
+      });
+    }
     setEditingText(false);
   };
 
@@ -386,9 +439,18 @@ export function PropertiesPanel({
       setEditingAlt(false);
       return;
     }
-    mutateAndSave((code) =>
+    const applied = mutateAndSave((code) =>
       updateElementAttribute(code, selectedBfId, "alt", altValue),
     );
+    // Immediately update selectedElement
+    if (applied && selectedElement) {
+      useEditorStore.setState({
+        selectedElement: {
+          ...selectedElement,
+          attributes: { ...selectedElement.attributes, alt: altValue },
+        },
+      });
+    }
     setEditingAlt(false);
   };
 
@@ -527,29 +589,24 @@ export function PropertiesPanel({
       <div className="flex-1 overflow-y-auto">
         {/* ── Size & Position ───────────────────────────────────── */}
         <Section title="Size & Position">
-          <div className="grid grid-cols-2 gap-2">
-            <PropInput
-              label="X Position"
-              value={Math.round(rect.left).toString()}
-              readOnly
-            />
-            <PropInput
-              label="Y Position"
-              value={Math.round(rect.top).toString()}
-              readOnly
-            />
-          </div>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <PropInput
-              label="Width (px)"
-              value={Math.round(rect.width).toString()}
-              readOnly
-            />
-            <PropInput
-              label="Height (px)"
-              value={Math.round(rect.height).toString()}
-              readOnly
-            />
+          {/* Computed dimensions (read-only) */}
+          <div className="grid grid-cols-4 gap-2 mb-2">
+            <div>
+              <label className="mb-0.5 block text-[10px] text-muted-foreground">X</label>
+              <div className="h-7 flex items-center rounded bg-muted/20 px-2 text-xs text-muted-foreground tabular-nums">{Math.round(rect.left)}</div>
+            </div>
+            <div>
+              <label className="mb-0.5 block text-[10px] text-muted-foreground">Y</label>
+              <div className="h-7 flex items-center rounded bg-muted/20 px-2 text-xs text-muted-foreground tabular-nums">{Math.round(rect.top)}</div>
+            </div>
+            <div>
+              <label className="mb-0.5 block text-[10px] text-muted-foreground">W</label>
+              <div className="h-7 flex items-center rounded bg-muted/20 px-2 text-xs text-muted-foreground tabular-nums">{Math.round(rect.width)}</div>
+            </div>
+            <div>
+              <label className="mb-0.5 block text-[10px] text-muted-foreground">H</label>
+              <div className="h-7 flex items-center rounded bg-muted/20 px-2 text-xs text-muted-foreground tabular-nums">{Math.round(rect.height)}</div>
+            </div>
           </div>
           {!isSvgElement && (
             <div className="mt-2 grid grid-cols-2 gap-2">
@@ -857,14 +914,17 @@ export function PropertiesPanel({
 
             {/* Line Height & Letter Spacing */}
             <div className="grid grid-cols-2 gap-2">
-              <PropInput
-                label="Line H"
+              <SelectInput
+                label="Line Height"
                 value={
                   parsed?.lineHeight
                     ? parsed.lineHeight.replace("leading-", "")
                     : ""
                 }
-                placeholder="auto"
+                options={[
+                  { label: "—", value: "" },
+                  ...LINE_HEIGHTS,
+                ]}
                 onChange={(v) => {
                   handleSwapClass(
                     parsed?.lineHeight ?? null,
@@ -872,14 +932,17 @@ export function PropertiesPanel({
                   );
                 }}
               />
-              <PropInput
-                label="Letter Sp"
+              <SelectInput
+                label="Letter Spacing"
                 value={
                   parsed?.letterSpacing
                     ? parsed.letterSpacing.replace("tracking-", "")
                     : ""
                 }
-                placeholder="normal"
+                options={[
+                  { label: "—", value: "" },
+                  ...LETTER_SPACINGS,
+                ]}
                 onChange={(v) => {
                   handleSwapClass(
                     parsed?.letterSpacing ?? null,

@@ -4,6 +4,7 @@ import { useEffect, useCallback, useState, useRef } from "react";
 import { AnimatePresence } from "framer-motion";
 import { useEditorStore, getCleanSource } from "@/lib/editor/store";
 import { stripBfIds } from "@/lib/design/inject-bf-ids";
+import { findElementInCode, getOpeningTag, moveElement } from "@/lib/design/code-mutator";
 import { Canvas } from "./canvas";
 import { LayersPanel } from "./LayersPanel";
 import { PropertiesPanel } from "./PropertiesPanel";
@@ -12,14 +13,15 @@ import { Toolbar } from "./Toolbar";
 import { StylePickerModal } from "./StylePickerModal";
 import type { GenerateConfig } from "./StylePickerModal";
 import { RegenerationModal } from "./RegenerationModal";
+import type { RegenerateConfig } from "./RegenerationModal";
 import { StreamingIndicator } from "./StreamingOverlay";
 import { VersionHistory } from "./VersionHistory";
 import { EditorChatPanel } from "./EditorChatPanel";
 import { useAIGenerate } from "@/hooks/useAIGenerate";
 import { useChatHistoryStore } from "@/stores/chat-history-store";
 import { UpgradeModal } from "@/components/features/upgrade-modal";
-import { useProjectStore } from "@/stores/project-store";
 import { extractHtmlFromStream } from "@/lib/ai/extract-code";
+import { readSSEStream } from "@/lib/sse-client";
 
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
@@ -81,7 +83,8 @@ export function DesignEditor({
 
   const [stylePickerOpen, setStylePickerOpen] = useState(false);
   const [regenModalOpen, setRegenModalOpen] = useState(false);
-  const regenerateAllDesigns = useProjectStore((s) => s.regenerateAllDesigns);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+
 
   // Refs for live iframe streaming
   const streamHtmlStartedRef = useRef(false);
@@ -429,12 +432,65 @@ export function DesignEditor({
 
   const handlePropertiesCodeChange = useCallback(
     (newCode: string) => {
+      const state = useEditorStore.getState();
+      const bfId = state.selectedBfId;
+      const oldSource = state.source;
+
       updateSource(newCode);
+
+      // Send postMessage for instant visual feedback (iframe reload is the safety net)
+      const iframe = iframeRef.current;
+      if (bfId && iframe?.contentWindow) {
+        const newLoc = findElementInCode(newCode, bfId);
+        const oldLoc = findElementInCode(oldSource, bfId);
+        if (newLoc) {
+          // Always send class update
+          iframe.contentWindow.postMessage(
+            { type: "UPDATE_CLASSES", bfId, classes: newLoc.classes },
+            "*",
+          );
+
+          // Detect text changes and send UPDATE_TEXT for instant feedback
+          if (oldLoc && !newLoc.selfClosing && !oldLoc.selfClosing) {
+            const oldTag = getOpeningTag(oldSource, oldLoc.start);
+            const newTag = getOpeningTag(newCode, newLoc.start);
+            if (oldTag && newTag) {
+              const oldText = oldSource.slice(oldTag.end, oldLoc.end - `</${oldLoc.tag}>`.length);
+              const newText = newCode.slice(newTag.end, newLoc.end - `</${newLoc.tag}>`.length);
+              if (oldText !== newText) {
+                iframe.contentWindow.postMessage(
+                  { type: "UPDATE_TEXT", bfId, newText: newText.trim() },
+                  "*",
+                );
+              }
+            }
+          }
+        }
+      }
+
       fetch(`/api/designs/${designId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ html: stripBfIds(newCode) }),
       });
+    },
+    [designId, updateSource],
+  );
+
+  // ─── Move element handler (drag-to-reorder) ─────────────────────
+
+  const handleMoveElement = useCallback(
+    (bfId: string, targetBfId: string, position: 'before' | 'after') => {
+      const currentSource = useEditorStore.getState().source;
+      const newSource = moveElement(currentSource, bfId, targetBfId, position);
+      if (newSource !== currentSource) {
+        updateSource(newSource);
+        fetch(`/api/designs/${designId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ html: stripBfIds(newSource) }),
+        });
+      }
     },
     [designId, updateSource],
   );
@@ -446,6 +502,112 @@ export function DesignEditor({
       updateSource(html);
     },
     [updateSource],
+  );
+
+  // ─── Regeneration (project designs) ─────────────────────────────
+
+  const handleRegenerate = useCallback(
+    async (config: RegenerateConfig) => {
+      setRegenModalOpen(false);
+      setSelectedBfId(null);
+      setIsRegenerating(true);
+      setStreamingToIframe(true);
+      streamHtmlStartedRef.current = false;
+      streamPrevHtmlLenRef.current = 0;
+
+      let accumulated = "";
+
+      try {
+        const response = await fetch(
+          `/api/projects/${projectId}/designs/generate`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              pageId,
+              stream: true,
+              forceRegenerate: true,
+              skipReview: true,
+              useStyleGuide: config.useStyleGuide,
+              stylePrompt: config.stylePrompt,
+            }),
+          },
+        );
+
+        if (!response.ok) {
+          setStreamingToIframe(false);
+          setIsRegenerating(false);
+          return;
+        }
+
+        await readSSEStream(response, {
+          onEvent: (event) => {
+            if (event.type === "chunk" && typeof event.text === "string") {
+              accumulated += event.text;
+              const iframe = iframeRef.current;
+              if (!iframe) return;
+
+              const { htmlStarted, htmlContent } =
+                extractHtmlFromStream(accumulated);
+              if (!htmlStarted) return;
+
+              if (!streamHtmlStartedRef.current) {
+                streamHtmlStartedRef.current = true;
+                streamPrevHtmlLenRef.current = 0;
+                try {
+                  const doc =
+                    iframe.contentDocument || iframe.contentWindow?.document;
+                  if (doc) {
+                    doc.open();
+                    doc.write(htmlContent);
+                    streamPrevHtmlLenRef.current = htmlContent.length;
+                  }
+                } catch (e) {
+                  console.error("Streaming write error:", e);
+                }
+              } else {
+                const newContent = htmlContent.slice(
+                  streamPrevHtmlLenRef.current,
+                );
+                streamPrevHtmlLenRef.current = htmlContent.length;
+                if (newContent) {
+                  try {
+                    const doc =
+                      iframe.contentDocument || iframe.contentWindow?.document;
+                    if (doc) {
+                      doc.write(newContent);
+                    }
+                  } catch (e) {
+                    console.error("Streaming write error:", e);
+                  }
+                }
+              }
+            } else if (event.type === "done" && event.design) {
+              const design = event.design as { html: string };
+              if (design.html) {
+                updateSource(design.html);
+              }
+              setStreamingToIframe(false);
+              setIsRegenerating(false);
+              streamHtmlStartedRef.current = false;
+              streamPrevHtmlLenRef.current = 0;
+            }
+          },
+          onError: () => {
+            setStreamingToIframe(false);
+            setIsRegenerating(false);
+            streamHtmlStartedRef.current = false;
+            streamPrevHtmlLenRef.current = 0;
+          },
+        });
+      } catch {
+        setStreamingToIframe(false);
+        setIsRegenerating(false);
+        streamHtmlStartedRef.current = false;
+        streamPrevHtmlLenRef.current = 0;
+      }
+    },
+    [projectId, pageId, updateSource, setStreamingToIframe, setSelectedBfId],
   );
 
   // ─── Keyboard shortcuts ───────────────────────────────────────────
@@ -535,15 +697,15 @@ export function DesignEditor({
         <div className="relative min-w-0 flex-1">
           {mode === "code" && <CodePanel />}
           <div className={mode === "code" ? "hidden" : "h-full"}>
-            <Canvas iframeRef={iframeRef} />
+            <Canvas iframeRef={iframeRef} onMoveElement={handleMoveElement} />
           </div>
-
-          {/* Streaming indicator (floating pill) */}
-          <StreamingIndicator
-            phase={streamPhase}
-            onCancel={cancelStream}
-          />
         </div>
+
+        {/* Streaming indicator (floating pill — positioned over the full editor area) */}
+        <StreamingIndicator
+          phase={isRegenerating ? "streaming" : streamPhase}
+          onCancel={isRegenerating ? undefined : cancelStream}
+        />
 
         {/* Right: Properties panel (design mode, toggled) */}
         {mode === "design" && showProperties && (
@@ -575,32 +737,8 @@ export function DesignEditor({
         <RegenerationModal
           open={regenModalOpen}
           onOpenChange={setRegenModalOpen}
-          projectId={projectId}
-          pageId={pageId}
-          designId={designId}
           isStyleGuide={isStyleGuide}
-          onRegenerationComplete={(html) => {
-            updateSource(html);
-            // Save to DB
-            fetch(`/api/designs/${designId}`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ html }),
-            });
-          }}
-          onRevert={async (previousHtml) => {
-            updateSource(previousHtml);
-            await fetch(`/api/designs/${designId}`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ html: previousHtml }),
-            });
-          }}
-          onUpdateAll={() => {
-            if (pageId) {
-              regenerateAllDesigns(pageId);
-            }
-          }}
+          onRegenerate={handleRegenerate}
         />
       )}
 

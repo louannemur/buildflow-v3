@@ -8,6 +8,7 @@ import {
   updateElementAttribute as mutateAttribute,
   addClassToElement,
   removeClassFromElement,
+  moveElement as moveElementFn,
 } from "@/lib/design/code-mutator";
 import { injectBfIds, stripBfIds, ensureBfIds } from "@/lib/design/inject-bf-ids";
 import { isHtmlDocument } from "@/lib/design/preview-transform";
@@ -79,6 +80,9 @@ export interface EditorState {
   iframeScrollTop: number;
   iframeScrollLeft: number;
 
+  // When true, the canvas skips the next iframe reload (postMessage already updated the DOM)
+  _skipIframeReload: boolean;
+
   // Actions
   init: (opts: {
     source: string;
@@ -119,6 +123,7 @@ export interface EditorState {
   removeElementClass: (bfId: string, className: string) => void;
   updateElementText: (bfId: string, newText: string) => void;
   updateElementAttribute: (bfId: string, attr: string, value: string) => void;
+  moveElement: (bfId: string, targetBfId: string, position: 'before' | 'after') => void;
 
   // Other
   clearDesign: () => void;
@@ -152,6 +157,7 @@ const initialState = {
   isStreamingToIframe: false,
   iframeScrollTop: 0,
   iframeScrollLeft: 0,
+  _skipIframeReload: false,
 };
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
@@ -366,6 +372,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   updateElementAttribute: (bfId, attr, value) => {
     const updated = mutateCode(get().source, (code) =>
       mutateAttribute(code, bfId, attr, value),
+    );
+    if (updated !== get().source) get().updateSource(updated);
+  },
+
+  moveElement: (bfId, targetBfId, position) => {
+    const updated = mutateCode(get().source, (code) =>
+      moveElementFn(code, bfId, targetBfId, position),
     );
     if (updated !== get().source) get().updateSource(updated);
   },

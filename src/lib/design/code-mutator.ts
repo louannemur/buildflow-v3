@@ -361,9 +361,13 @@ export function updateElementClasses(code: string, bfId: string, newClasses: str
 
 /**
  * Update an element's direct text content.
- * Only works for simple text nodes — not for elements with complex children.
+ * Handles both simple text elements and elements with mixed content
+ * (text nodes + child elements) by doing targeted replacement.
+ *
+ * @param oldText - Optional: the current text to find and replace (for mixed content).
+ *                  When provided, enables targeted replacement even in elements with children.
  */
-export function updateElementText(code: string, bfId: string, newText: string): string {
+export function updateElementText(code: string, bfId: string, newText: string, oldText?: string): string {
   const loc = findElementInCode(code, bfId);
   if (!loc || loc.selfClosing) return code;
 
@@ -373,17 +377,22 @@ export function updateElementText(code: string, bfId: string, newText: string): 
   const contentStart = openingTag.end;
   const closingTagStart = loc.end - `</${loc.tag}>`.length;
 
-  // Only replace if the content is simple text (no nested tags)
   const content = code.slice(contentStart, closingTagStart);
 
   // Check if the content is just text (no < characters except in expressions)
   const strippedContent = content.replace(/\{[^}]*\}/g, '');
-  if (strippedContent.includes('<')) {
-    // Has nested elements — don't replace blindly
-    return code;
+  if (!strippedContent.includes('<')) {
+    // Simple text only — replace all content
+    return code.slice(0, contentStart) + newText + code.slice(closingTagStart);
   }
 
-  return code.slice(0, contentStart) + newText + code.slice(closingTagStart);
+  // Has nested elements — try targeted replacement if oldText is provided
+  if (oldText && content.includes(oldText)) {
+    const newContent = content.replace(oldText, newText);
+    return code.slice(0, contentStart) + newContent + code.slice(closingTagStart);
+  }
+
+  return code;
 }
 
 /**
@@ -468,7 +477,7 @@ export function removeClassFromElement(code: string, bfId: string, classToRemove
 /**
  * Get the opening tag content and end position for an element.
  */
-function getOpeningTag(code: string, start: number): { content: string; end: number } | null {
+export function getOpeningTag(code: string, start: number): { content: string; end: number } | null {
   const end = findOpeningTagEnd(code, start);
   if (end === -1) return null;
   return { content: code.slice(start, end + 1), end: end + 1 };
@@ -548,6 +557,42 @@ export function updateElementAttribute(
   const insertAt2 = loc.start + closingIdx;
   const insertion2 = ` ${attrName}="${newValue}" `;
   return code.slice(0, insertAt2) + insertion2 + code.slice(insertAt2);
+}
+
+/**
+ * Move an element to a new position relative to a target sibling element.
+ * Removes the element from its current position and inserts it before/after the target.
+ * Only works for elements within the same parent (siblings).
+ */
+export function moveElement(
+  code: string,
+  bfId: string,
+  targetBfId: string,
+  position: 'before' | 'after',
+): string {
+  if (bfId === targetBfId) return code;
+
+  const loc = findElementInCode(code, bfId);
+  if (!loc) return code;
+
+  const elementJsx = loc.outerJsx;
+
+  // Remove the element from the code
+  const codeWithout = removeElement(code, bfId);
+
+  // Find the target in the modified code
+  const targetLoc = findElementInCode(codeWithout, targetBfId);
+  if (!targetLoc) return code; // Fallback to original
+
+  // Determine indentation from the target element
+  const lineStart = codeWithout.lastIndexOf('\n', targetLoc.start) + 1;
+  const indent = codeWithout.slice(lineStart, targetLoc.start).match(/^\s*/)?.[0] || '';
+
+  if (position === 'before') {
+    return codeWithout.slice(0, targetLoc.start) + elementJsx + '\n' + indent + codeWithout.slice(targetLoc.start);
+  } else {
+    return codeWithout.slice(0, targetLoc.end) + '\n' + indent + elementJsx + codeWithout.slice(targetLoc.end);
+  }
 }
 
 /**
