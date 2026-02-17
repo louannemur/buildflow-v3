@@ -478,8 +478,8 @@ export async function POST(
         let savedFiles: BuildFile[] = [];
         try {
           const stream = anthropic.messages.stream({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 64000,
+            model: "claude-opus-4-20250514",
+            max_tokens: 32000,
             system: systemPrompt,
             messages: [
               {
