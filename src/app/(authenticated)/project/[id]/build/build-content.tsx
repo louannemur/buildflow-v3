@@ -473,7 +473,11 @@ export function BuildContent() {
     async function fetchPublishStatus() {
       try {
         const res = await fetch(`/api/projects/${project!.id}/publish`);
-        if (!res.ok) return;
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          console.error("Publish status check failed:", res.status, errBody);
+          return;
+        }
         const data = await res.json();
         if (data.published) {
           setPublishedUrl(data.url);
