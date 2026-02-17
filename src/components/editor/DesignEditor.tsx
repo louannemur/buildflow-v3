@@ -22,6 +22,7 @@ import { useChatHistoryStore } from "@/stores/chat-history-store";
 import { UpgradeModal } from "@/components/features/upgrade-modal";
 import { extractHtmlFromStream } from "@/lib/ai/extract-code";
 import { readSSEStream } from "@/lib/sse-client";
+import { toast } from "sonner";
 
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
@@ -465,6 +466,31 @@ export function DesignEditor({
               }
             }
           }
+
+          // Send inline color styles for instant visual feedback
+          const tagInfo = getOpeningTag(newCode, newLoc.start);
+          if (tagInfo) {
+            const sMatch = tagInfo.content.match(/\bstyle\s*=\s*"([^"]*)"/);
+            if (sMatch) {
+              const inlineStyle = sMatch[1];
+              const colorMappings: [string, string][] = [
+                ["color", "color"],
+                ["background-color", "backgroundColor"],
+                ["border-color", "borderColor"],
+              ];
+              for (const [css, js] of colorMappings) {
+                const pMatch = inlineStyle.match(
+                  new RegExp(`(?:^|;)\\s*${css.replace(/-/g, "\\-")}\\s*:\\s*([^;]+)`)
+                );
+                if (pMatch) {
+                  iframe.contentWindow.postMessage(
+                    { type: "UPDATE_STYLE", bfId, prop: js, value: pMatch[1].trim() },
+                    "*",
+                  );
+                }
+              }
+            }
+          }
         }
       }
 
@@ -516,6 +542,14 @@ export function DesignEditor({
       streamPrevHtmlLenRef.current = 0;
 
       let accumulated = "";
+      let receivedDone = false;
+
+      const resetStreamState = () => {
+        setStreamingToIframe(false);
+        setIsRegenerating(false);
+        streamHtmlStartedRef.current = false;
+        streamPrevHtmlLenRef.current = 0;
+      };
 
       try {
         const response = await fetch(
@@ -535,8 +569,14 @@ export function DesignEditor({
         );
 
         if (!response.ok) {
-          setStreamingToIframe(false);
-          setIsRegenerating(false);
+          const errorText = await response.text().catch(() => "");
+          console.error("Regeneration failed:", response.status, errorText);
+          if (response.status === 429) {
+            setShowUpgradeModal(true);
+          } else {
+            toast.error("Failed to regenerate design. Please try again.");
+          }
+          resetStreamState();
           return;
         }
 
@@ -583,31 +623,43 @@ export function DesignEditor({
                 }
               }
             } else if (event.type === "done" && event.design) {
+              receivedDone = true;
               const design = event.design as { html: string };
               if (design.html) {
                 updateSource(design.html);
+                addMessage(designId, {
+                  role: "assistant",
+                  content: "Design regenerated!",
+                  editType: "full-page",
+                });
               }
-              setStreamingToIframe(false);
-              setIsRegenerating(false);
-              streamHtmlStartedRef.current = false;
-              streamPrevHtmlLenRef.current = 0;
+              resetStreamState();
             }
           },
-          onError: () => {
-            setStreamingToIframe(false);
-            setIsRegenerating(false);
-            streamHtmlStartedRef.current = false;
-            streamPrevHtmlLenRef.current = 0;
+          onError: (err) => {
+            console.error("Regeneration stream error:", err);
+            toast.error("Generation failed. Please try again.");
+            resetStreamState();
           },
         });
-      } catch {
-        setStreamingToIframe(false);
-        setIsRegenerating(false);
-        streamHtmlStartedRef.current = false;
-        streamPrevHtmlLenRef.current = 0;
+
+        // Safety net: if stream ended without done/error, still clean up
+        if (!receivedDone) {
+          if (accumulated) {
+            const { htmlContent } = extractHtmlFromStream(accumulated);
+            if (htmlContent) {
+              updateSource(htmlContent);
+            }
+          }
+          resetStreamState();
+        }
+      } catch (err) {
+        console.error("Regeneration error:", err);
+        toast.error("Something went wrong. Please try again.");
+        resetStreamState();
       }
     },
-    [projectId, pageId, updateSource, setStreamingToIframe, setSelectedBfId],
+    [projectId, pageId, designId, updateSource, addMessage, setStreamingToIframe, setSelectedBfId, setShowUpgradeModal],
   );
 
   // ─── Keyboard shortcuts ───────────────────────────────────────────

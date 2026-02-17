@@ -7,6 +7,9 @@
  *   GET_TREE          -> iframe responds with TREE_DATA
  *   GET_ELEMENT {bfId} -> iframe responds with ELEMENT_DATA
  *   SCROLL_TO {bfId}  -> scrolls element into view
+ *   UPDATE_CLASSES {bfId, classes} -> live DOM class update, responds with TREE_DATA
+ *   UPDATE_TEXT {bfId, newText}    -> live DOM text update, responds with TREE_DATA
+ *   UPDATE_ATTRIBUTE {bfId, attr, value} -> live DOM attribute update, responds with TREE_DATA
  *
  * iframe -> parent:
  *   READY             -> iframe finished rendering
@@ -324,6 +327,41 @@ export function getIframeBridgeScript(): string {
         var scrollEl = document.querySelector('[data-bf-id="' + data.bfId + '"]');
         if (scrollEl) {
           scrollEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        break;
+      }
+
+      case 'UPDATE_CLASSES': {
+        var ucEl = document.querySelector('[data-bf-id="' + data.bfId + '"]');
+        if (ucEl) {
+          ucEl.setAttribute('class', data.classes);
+          // Don't send TREE_DATA — the parent store already has correct data
+          // from the source code mutation. Sending stale tree data would
+          // overwrite selectedElement and revert property panel values.
+        }
+        break;
+      }
+
+      case 'UPDATE_TEXT': {
+        var utEl = document.querySelector('[data-bf-id="' + data.bfId + '"]');
+        if (utEl) {
+          utEl.textContent = data.newText;
+        }
+        break;
+      }
+
+      case 'UPDATE_ATTRIBUTE': {
+        var uaEl = document.querySelector('[data-bf-id="' + data.bfId + '"]');
+        if (uaEl) {
+          uaEl.setAttribute(data.attr, data.value);
+        }
+        break;
+      }
+
+      case 'UPDATE_STYLE': {
+        var usEl = document.querySelector('[data-bf-id="' + data.bfId + '"]');
+        if (usEl && data.prop) {
+          usEl.style[data.prop] = data.value || '';
         }
         break;
       }

@@ -18,6 +18,7 @@ import {
   removeClassFromElement,
   updateElementText,
   updateElementAttribute,
+  setInlineStyleProperty,
 } from "@/lib/design/code-mutator";
 import { injectBfIds, stripBfIds } from "@/lib/design/inject-bf-ids";
 import { isHtmlDocument } from "@/lib/design/preview-transform";
@@ -376,6 +377,63 @@ export function PropertiesPanel({
     }
   };
 
+  /** Change a color property: swaps the Tailwind class AND sets an inline style
+   *  so the change always takes effect even when custom CSS overrides utilities. */
+  const handleColorChange = (
+    colorType: "text" | "bg" | "border",
+    hex: string,
+  ) => {
+    if (!selectedBfId) return;
+    const cssProp =
+      colorType === "text" ? "color"
+        : colorType === "bg" ? "background-color"
+          : "border-color";
+    const field: "textColor" | "bgColor" | "borderColor" =
+      colorType === "text" ? "textColor"
+        : colorType === "bg" ? "bgColor"
+          : "borderColor";
+
+    let newClassesStr: string | null = null;
+    const applied = mutateAndSave((code) => {
+      let result = code;
+
+      // 1. Swap Tailwind color class
+      const loc = findElementInCode(result, selectedBfId);
+      if (loc) {
+        const currentClasses = loc.classes;
+        const freshParsed = parseTailwindClasses(currentClasses);
+        const newClass = hexToTwClass(hex, colorType);
+        let updated = swapClass(currentClasses, freshParsed[field] as string | null, newClass);
+        // For border, also ensure border width class is present
+        if (colorType === "border" && !freshParsed.borderWidth) {
+          updated = swapClass(updated, null, "border");
+        }
+        if (updated !== currentClasses) {
+          newClassesStr = updated;
+          result = updateElementClasses(result, selectedBfId, updated);
+        }
+      }
+
+      // 2. Set inline style for CSS specificity reliability
+      result = setInlineStyleProperty(result, selectedBfId, cssProp, hex);
+      return result;
+    });
+
+    if (applied && selectedElement) {
+      const computedKey = colorType === "text" ? "_computedColor" : "_computedBg";
+      useEditorStore.setState({
+        selectedElement: {
+          ...selectedElement,
+          classes: newClassesStr || selectedElement.classes,
+          attributes: {
+            ...selectedElement.attributes,
+            [computedKey]: hex,
+          },
+        },
+      });
+    }
+  };
+
   const handleRemoveClass = (cls: string) => {
     if (!selectedBfId) return;
     const applied = mutateAndSave((code) => removeClassFromElement(code, selectedBfId, cls));
@@ -459,18 +517,17 @@ export function PropertiesPanel({
   const currentAlt = selectedElement.attributes?.alt || "";
   const rect = selectedElement.rect;
 
-  // Colors — from Tailwind classes, then fall back to computed/attributes
+  // Colors — prefer computed color (what the user actually sees) over Tailwind class,
+  // since custom CSS may override Tailwind utilities.
   const attrs = selectedElement.attributes;
-  const bgHex = parsed?.bgColor
-    ? twClassToHex(parsed.bgColor)
-    : attrs?._computedBg && attrs._computedBg !== "rgba(0, 0, 0, 0)"
-      ? rgbToHex(attrs._computedBg)
-      : null;
-  const textHex = parsed?.textColor
-    ? twClassToHex(parsed.textColor)
-    : attrs?._computedColor
-      ? rgbToHex(attrs._computedColor)
-      : null;
+  const computedBgHex = attrs?._computedBg && attrs._computedBg !== "rgba(0, 0, 0, 0)"
+    ? rgbToHex(attrs._computedBg) : null;
+  const bgHex = computedBgHex
+    ?? (parsed?.bgColor ? twClassToHex(parsed.bgColor) : null);
+  const computedTextHex = attrs?._computedColor
+    ? rgbToHex(attrs._computedColor) : null;
+  const textHex = computedTextHex
+    ?? (parsed?.textColor ? twClassToHex(parsed.textColor) : null);
   const borderHex = parsed?.borderColor
     ? twClassToHex(parsed.borderColor)
     : null;
@@ -697,10 +754,7 @@ export function PropertiesPanel({
           <div className="space-y-2">
             <ColorInput
               hex={bgHex}
-              onChange={(hex) => {
-                const newClass = hexToTwClass(hex, "bg");
-                handleSwapClass(parsed?.bgColor ?? null, newClass);
-              }}
+              onChange={(hex) => handleColorChange("bg", hex)}
             />
             {!parsed?.bgColor && bgHex && (
               <p className="text-[10px] text-muted-foreground italic">Computed</p>
@@ -727,25 +781,7 @@ export function PropertiesPanel({
           <div className="space-y-2">
             <ColorInput
               hex={borderHex}
-              onChange={(hex) => {
-                if (!selectedBfId) return;
-                const newColorClass = hexToTwClass(hex, "border");
-                // Combined in one mutateAndSave to avoid the second call
-                // clobbering the first (React state hasn't updated yet)
-                mutateAndSave((code) => {
-                  const loc = findElementInCode(code, selectedBfId);
-                  const currentClasses = loc?.classes ?? "";
-                  const freshParsed = parseTailwindClasses(currentClasses);
-                  let updated = swapClass(currentClasses, freshParsed.borderColor, newColorClass);
-                  if (!freshParsed.borderWidth) {
-                    updated = swapClass(updated, null, "border");
-                  }
-                  if (updated !== currentClasses) {
-                    return updateElementClasses(code, selectedBfId, updated);
-                  }
-                  return code;
-                });
-              }}
+              onChange={(hex) => handleColorChange("border", hex)}
             />
             {svgStroke && (
               <div>
@@ -839,10 +875,7 @@ export function PropertiesPanel({
             <ColorInput
               label="Color"
               hex={textHex}
-              onChange={(hex) => {
-                const newClass = hexToTwClass(hex, "text");
-                handleSwapClass(parsed?.textColor ?? null, newClass);
-              }}
+              onChange={(hex) => handleColorChange("text", hex)}
             />
             {!parsed?.textColor && textHex && (
               <p className="text-[10px] text-muted-foreground italic">Inherited</p>

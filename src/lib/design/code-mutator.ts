@@ -596,6 +596,158 @@ export function moveElement(
 }
 
 /**
+ * Find the bf-ids of the previous and next sibling elements in the HTML code.
+ * Siblings are determined by finding elements at the same nesting level
+ * within the same parent block — not from the element tree (which can skip
+ * non-bf-id wrapper elements and produce incorrect sibling relationships).
+ */
+export function findCodeSiblings(code: string, bfId: string): {
+  prevBfId: string | null;
+  nextBfId: string | null;
+} {
+  const loc = findElementInCode(code, bfId);
+  if (!loc) return { prevBfId: null, nextBfId: null };
+
+  // Determine the indentation of this element to find same-level siblings
+  const lineStart = code.lastIndexOf('\n', loc.start) + 1;
+  const indent = code.slice(lineStart, loc.start).match(/^\s*/)?.[0] || '';
+
+  // Find the parent block boundaries by looking for the enclosing tag
+  // Walk backwards from our element to find where the parent's content starts
+  let parentContentStart = 0;
+  let parentContentEnd = code.length;
+
+  // Walk backwards to find the parent opening tag's end (the > before our content area)
+  let depth = 0;
+  for (let i = loc.start - 1; i >= 0; i--) {
+    const ch = code[i];
+    if (ch === '>' && i > 0 && code[i - 1] !== '-') {
+      // Check if this closes an opening tag (not a closing tag like </div>)
+      // Walk back to find if this is </tag> or <tag>
+      let j = i - 1;
+      while (j >= 0 && code[j] !== '<') j--;
+      if (j >= 0) {
+        if (code[j + 1] === '/') {
+          depth++;
+        } else {
+          if (depth > 0) {
+            depth--;
+          } else {
+            parentContentStart = i + 1;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // Walk forward from end of our element to find the parent closing tag
+  depth = 0;
+  for (let i = loc.end; i < code.length; i++) {
+    if (code[i] === '<') {
+      if (code[i + 1] === '/') {
+        if (depth === 0) {
+          parentContentEnd = i;
+          break;
+        }
+        depth--;
+      } else if (code[i] === '<' && code.slice(i).match(/^<[a-zA-Z]/)) {
+        // Opening tag — find its end
+        const endIdx = findOpeningTagEnd(code, i);
+        if (endIdx !== -1) {
+          const tagStr = code.slice(i, endIdx + 1);
+          if (!tagStr.endsWith('/>')) {
+            depth++;
+          }
+          i = endIdx;
+        }
+      }
+    }
+  }
+
+  // Scan the parent content area for all bf-id elements at the same indent level
+  const bfIdPattern = /data-bf-id="(bf_[a-zA-Z0-9]+)"/g;
+  const siblingBfIds: string[] = [];
+  const contentArea = code.slice(parentContentStart, parentContentEnd);
+
+  let match;
+  while ((match = bfIdPattern.exec(contentArea)) !== null) {
+    const foundBfId = match[1];
+    const absPos = parentContentStart + match.index;
+
+    // Check that this element is at the same indentation level
+    const foundLineStart = code.lastIndexOf('\n', absPos) + 1;
+    // Walk back to the opening < of this element
+    let openBracket = absPos;
+    while (openBracket > foundLineStart && code[openBracket] !== '<') openBracket--;
+
+    const foundIndent = code.slice(foundLineStart, openBracket).match(/^\s*/)?.[0] || '';
+    if (foundIndent === indent) {
+      siblingBfIds.push(foundBfId);
+    }
+  }
+
+  const idx = siblingBfIds.indexOf(bfId);
+  return {
+    prevBfId: idx > 0 ? siblingBfIds[idx - 1] : null,
+    nextBfId: idx >= 0 && idx < siblingBfIds.length - 1 ? siblingBfIds[idx + 1] : null,
+  };
+}
+
+/**
+ * Set a CSS property on an element's inline style attribute.
+ * Creates the style attribute if it doesn't exist, or merges with existing styles.
+ */
+export function setInlineStyleProperty(
+  code: string,
+  bfId: string,
+  property: string,
+  value: string,
+): string {
+  const loc = findElementInCode(code, bfId);
+  if (!loc) return code;
+
+  const tag = getOpeningTag(code, loc.start);
+  if (!tag) return code;
+
+  const opening = tag.content;
+
+  // Check if element already has a style attribute
+  const styleMatch = opening.match(/\bstyle\s*=\s*"([^"]*)"/);
+  if (styleMatch) {
+    const currentStyle = styleMatch[1];
+    // Replace existing property or append
+    const propRegex = new RegExp(
+      `(^|;\\s*)${escapeRegex(property)}\\s*:[^;]*(;|$)`
+    );
+    let newStyle: string;
+    if (propRegex.test(currentStyle)) {
+      newStyle = currentStyle.replace(propRegex, `$1${property}: ${value};`);
+    } else {
+      const sep = currentStyle && !currentStyle.trimEnd().endsWith(';') ? '; ' : ' ';
+      newStyle = currentStyle
+        ? `${currentStyle}${sep}${property}: ${value};`
+        : `${property}: ${value};`;
+    }
+    const updated = opening.replace(
+      /\bstyle\s*=\s*"[^"]*"/,
+      `style="${newStyle.trim()}"`
+    );
+    return code.slice(0, loc.start) + updated + code.slice(tag.end);
+  }
+
+  // No style attribute — insert after data-bf-id
+  const bfIdAttr = `data-bf-id="${bfId}"`;
+  const bfIdPos = opening.indexOf(bfIdAttr);
+  if (bfIdPos !== -1) {
+    const insertAt = loc.start + bfIdPos + bfIdAttr.length;
+    return code.slice(0, insertAt) + ` style="${property}: ${value};"` + code.slice(insertAt);
+  }
+
+  return code;
+}
+
+/**
  * Escape special regex characters in a string.
  */
 function escapeRegex(str: string): string {
