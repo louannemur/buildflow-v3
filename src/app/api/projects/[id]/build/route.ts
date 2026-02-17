@@ -479,7 +479,7 @@ export async function POST(
         try {
           const stream = anthropic.messages.stream({
             model: "claude-opus-4-6",
-            max_tokens: 32000,
+            max_tokens: 128000,
             system: systemPrompt,
             messages: [
               {
@@ -718,8 +718,8 @@ export async function POST(
                 });
 
                 const fixResponse = await anthropic.messages.create({
-                  model: "claude-sonnet-4-20250514",
-                  max_tokens: 32000,
+                  model: "claude-sonnet-4-5-20250929",
+                  max_tokens: 64000,
                   system: `You are an expert developer. You will be given a project that failed to build along with the build error output. Fix ONLY the files that have errors. Output each fixed file using this exact format:\n\n===FILE: path/to/file===\nfixed content\n===END FILE===\n\nDo NOT output files that don't need changes. Do NOT add explanations outside of file markers.`,
                   messages: [
                     {
