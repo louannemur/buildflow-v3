@@ -65,6 +65,7 @@ import {
 } from "@/stores/project-store";
 import type { FlowStep } from "@/lib/db/schema";
 import { cn } from "@/lib/utils";
+import { readSSEStream } from "@/lib/sse-client";
 import { UpgradeModal } from "@/components/features/upgrade-modal";
 
 /* ─── Animation ──────────────────────────────────────────────────────────── */
@@ -194,9 +195,28 @@ export function FlowsContent() {
         return;
       }
 
-      const data = await res.json();
-      setUserFlows(data.items);
-      toast.success(`Generated ${data.items.length} user flows.`);
+      if (res.headers.get("content-type")?.includes("text/event-stream")) {
+        setUserFlows([]);
+        const items: ProjectUserFlow[] = [];
+        await readSSEStream(res, {
+          onEvent: (event) => {
+            if (event.type === "item" && event.flow) {
+              items.push(event.flow as ProjectUserFlow);
+              setUserFlows([...items]);
+            }
+          },
+          onError: () => {
+            toast.error("Generation failed. Please try again.");
+          },
+        });
+        if (items.length > 0) {
+          toast.success(`Generated ${items.length} user flows.`);
+        }
+      } else {
+        const data = await res.json();
+        setUserFlows(data.items);
+        toast.success(`Generated ${data.items.length} user flows.`);
+      }
     } catch {
       toast.error("Something went wrong. Please try again.");
     } finally {
@@ -447,7 +467,7 @@ export function FlowsContent() {
         </div>
 
         {/* Generating skeleton */}
-        {generating && (
+        {generating && userFlows.length === 0 && (
           <div className="grid gap-5 sm:grid-cols-2">
             {Array.from({ length: 4 }).map((_, i) => (
               <div
@@ -502,7 +522,7 @@ export function FlowsContent() {
         )}
 
         {/* List view */}
-        {!generating && userFlows.length > 0 && view === "list" && (() => {
+        {userFlows.length > 0 && view === "list" && (() => {
           const MAX_VISIBLE = 6;
           const maxSteps = Math.min(Math.max(...userFlows.map((f) => f.steps.length)), MAX_VISIBLE);
 
@@ -533,7 +553,7 @@ export function FlowsContent() {
         })()}
 
         {/* Diagram view */}
-        {!generating && userFlows.length > 0 && view === "diagram" && (
+        {userFlows.length > 0 && view === "diagram" && (
           <div className="flex flex-col gap-6 lg:flex-row">
             {/* Flow selector sidebar */}
             <div className="w-full shrink-0 lg:w-56">

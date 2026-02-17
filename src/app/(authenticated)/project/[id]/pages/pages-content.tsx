@@ -62,6 +62,7 @@ import {
 } from "@/stores/project-store";
 import type { PageContent } from "@/lib/db/schema";
 import { cn } from "@/lib/utils";
+import { readSSEStream } from "@/lib/sse-client";
 import { UpgradeModal } from "@/components/features/upgrade-modal";
 
 /* ─── Animation ──────────────────────────────────────────────────────────── */
@@ -184,9 +185,28 @@ export function PagesContent() {
         return;
       }
 
-      const data = await res.json();
-      setPages(data.items);
-      toast.success(`Generated ${data.items.length} pages.`);
+      if (res.headers.get("content-type")?.includes("text/event-stream")) {
+        setPages([]);
+        const items: ProjectPage[] = [];
+        await readSSEStream(res, {
+          onEvent: (event) => {
+            if (event.type === "item" && event.page) {
+              items.push(event.page as ProjectPage);
+              setPages([...items]);
+            }
+          },
+          onError: () => {
+            toast.error("Generation failed. Please try again.");
+          },
+        });
+        if (items.length > 0) {
+          toast.success(`Generated ${items.length} pages.`);
+        }
+      } else {
+        const data = await res.json();
+        setPages(data.items);
+        toast.success(`Generated ${data.items.length} pages.`);
+      }
     } catch {
       toast.error("Something went wrong. Please try again.");
     } finally {
@@ -408,7 +428,7 @@ export function PagesContent() {
         </div>
 
         {/* Generating skeleton */}
-        {generating && (
+        {generating && pages.length === 0 && (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 6 }).map((_, i) => (
               <div
@@ -457,7 +477,7 @@ export function PagesContent() {
         )}
 
         {/* Page cards grid */}
-        {!generating && pages.length > 0 && (
+        {pages.length > 0 && (
           <motion.div
             initial="hidden"
             animate="visible"

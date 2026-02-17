@@ -5,6 +5,7 @@ import { anthropic } from "@/lib/ai";
 import { db } from "@/lib/db";
 import { features, projects } from "@/lib/db/schema";
 import { getUserPlan, checkUsage, incrementUsage } from "@/lib/usage";
+import { createSSEResponse } from "@/lib/sse";
 
 const SYSTEM_PROMPT = `You are a product strategist. Given the project name and description, generate 6-10 key features for an MVP.
 
@@ -56,57 +57,75 @@ export async function POST(
       ? `Project: ${project.name}\nDescription: ${project.description}`
       : `Project: ${project.name}`;
 
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1500,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userMessage }],
+    return createSSEResponse(async (enqueue) => {
+      const stream = anthropic.messages.stream({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1500,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: "user", content: userMessage }],
+      });
+
+      let accumulated = "";
+
+      for await (const event of stream) {
+        if (
+          event.type === "content_block_delta" &&
+          event.delta.type === "text_delta"
+        ) {
+          accumulated += event.delta.text;
+          enqueue({ type: "progress", text: event.delta.text });
+        }
+      }
+
+      // Parse the JSON array from accumulated text
+      const jsonMatch = accumulated.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) {
+        enqueue({
+          type: "error",
+          message: "Failed to generate features. Please try again.",
+        });
+        return;
+      }
+
+      const generated = JSON.parse(jsonMatch[0]) as {
+        title: string;
+        description: string;
+      }[];
+
+      if (!Array.isArray(generated) || generated.length === 0) {
+        enqueue({
+          type: "error",
+          message: "Failed to generate features. Please try again.",
+        });
+        return;
+      }
+
+      // Delete existing features for this project
+      await db.delete(features).where(eq(features.projectId, id));
+
+      // Insert generated features
+      const newFeatures = await db
+        .insert(features)
+        .values(
+          generated.map((f, i) => ({
+            projectId: id,
+            title: f.title,
+            description: f.description,
+            order: i,
+          })),
+        )
+        .returning();
+
+      // Increment AI usage
+      await incrementUsage(userId, "aiGenerations");
+
+      // Emit each feature individually for animated reveal
+      for (const feature of newFeatures) {
+        enqueue({ type: "item", feature });
+      }
+
+      enqueue({ type: "done", items: newFeatures });
     });
-
-    const text =
-      response.content[0].type === "text" ? response.content[0].text : "";
-
-    // Parse the JSON array from Claude
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) {
-      return NextResponse.json(
-        { error: "Failed to generate features. Please try again." },
-        { status: 500 },
-      );
-    }
-
-    const generated = JSON.parse(jsonMatch[0]) as {
-      title: string;
-      description: string;
-    }[];
-
-    if (!Array.isArray(generated) || generated.length === 0) {
-      return NextResponse.json(
-        { error: "Failed to generate features. Please try again." },
-        { status: 500 },
-      );
-    }
-
-    // Delete existing features for this project
-    await db.delete(features).where(eq(features.projectId, id));
-
-    // Insert generated features
-    const newFeatures = await db
-      .insert(features)
-      .values(
-        generated.map((f, i) => ({
-          projectId: id,
-          title: f.title,
-          description: f.description,
-          order: i,
-        })),
-      )
-      .returning();
-
-    // Increment AI usage
-    await incrementUsage(userId, "aiGenerations");
-
-    return NextResponse.json({ items: newFeatures }, { status: 201 });
   } catch {
     return NextResponse.json(
       { error: "Something went wrong. Please try again." },

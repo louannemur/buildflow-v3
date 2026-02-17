@@ -40,6 +40,7 @@ import {
   type ProjectFeature,
 } from "@/stores/project-store";
 import { cn } from "@/lib/utils";
+import { readSSEStream } from "@/lib/sse-client";
 import { UpgradeModal } from "@/components/features/upgrade-modal";
 
 /* ─── Animation ──────────────────────────────────────────────────────────── */
@@ -173,9 +174,28 @@ export function FeaturesContent() {
         return;
       }
 
-      const data = await res.json();
-      setFeatures(data.items);
-      toast.success(`Generated ${data.items.length} features.`);
+      if (res.headers.get("content-type")?.includes("text/event-stream")) {
+        setFeatures([]);
+        const items: ProjectFeature[] = [];
+        await readSSEStream(res, {
+          onEvent: (event) => {
+            if (event.type === "item" && event.feature) {
+              items.push(event.feature as ProjectFeature);
+              setFeatures([...items]);
+            }
+          },
+          onError: () => {
+            toast.error("Generation failed. Please try again.");
+          },
+        });
+        if (items.length > 0) {
+          toast.success(`Generated ${items.length} features.`);
+        }
+      } else {
+        const data = await res.json();
+        setFeatures(data.items);
+        toast.success(`Generated ${data.items.length} features.`);
+      }
     } catch {
       toast.error("Something went wrong. Please try again.");
     } finally {
@@ -438,7 +458,7 @@ export function FeaturesContent() {
         </div>
 
         {/* Generating skeleton */}
-        {generating && (
+        {generating && features.length === 0 && (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {Array.from({ length: 8 }).map((_, i) => (
               <div
@@ -491,7 +511,7 @@ export function FeaturesContent() {
         )}
 
         {/* Feature card grid */}
-        {!generating && features.length > 0 && (
+        {features.length > 0 && (
           <motion.div
             variants={container}
             initial="hidden"

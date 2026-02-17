@@ -5,6 +5,7 @@ import { anthropic } from "@/lib/ai";
 import { db } from "@/lib/db";
 import { features, userFlows, pages, projects } from "@/lib/db/schema";
 import { getUserPlan, checkUsage, incrementUsage } from "@/lib/usage";
+import { createSSEResponse } from "@/lib/sse";
 
 const SYSTEM_PROMPT = `You are a product designer. Given the project info, features, and user flows, determine all the pages this application needs.
 
@@ -77,58 +78,76 @@ export async function POST(
       userMessage += `\n\nUser Flows:\n${projectFlows.map((f) => `- ${f.title} (${f.steps?.length ?? 0} steps)`).join("\n")}`;
     }
 
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 4000,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userMessage }],
+    return createSSEResponse(async (enqueue) => {
+      const stream = anthropic.messages.stream({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 4000,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: "user", content: userMessage }],
+      });
+
+      let accumulated = "";
+
+      for await (const event of stream) {
+        if (
+          event.type === "content_block_delta" &&
+          event.delta.type === "text_delta"
+        ) {
+          accumulated += event.delta.text;
+          enqueue({ type: "progress", text: event.delta.text });
+        }
+      }
+
+      const jsonMatch = accumulated.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) {
+        enqueue({
+          type: "error",
+          message: "Failed to generate pages. Please try again.",
+        });
+        return;
+      }
+
+      const generated = JSON.parse(jsonMatch[0]) as {
+        title: string;
+        description: string;
+        contents: { id: string; name: string; description: string }[];
+      }[];
+
+      if (!Array.isArray(generated) || generated.length === 0) {
+        enqueue({
+          type: "error",
+          message: "Failed to generate pages. Please try again.",
+        });
+        return;
+      }
+
+      // Delete existing pages
+      await db.delete(pages).where(eq(pages.projectId, id));
+
+      // Insert generated pages
+      const newPages = await db
+        .insert(pages)
+        .values(
+          generated.map((p, i) => ({
+            projectId: id,
+            title: p.title,
+            description: p.description,
+            contents: p.contents,
+            order: i,
+          })),
+        )
+        .returning();
+
+      // Increment AI usage
+      await incrementUsage(userId, "aiGenerations");
+
+      // Emit each page individually for animated reveal
+      for (const page of newPages) {
+        enqueue({ type: "item", page });
+      }
+
+      enqueue({ type: "done", items: newPages });
     });
-
-    const text =
-      response.content[0].type === "text" ? response.content[0].text : "";
-
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) {
-      return NextResponse.json(
-        { error: "Failed to generate pages. Please try again." },
-        { status: 500 },
-      );
-    }
-
-    const generated = JSON.parse(jsonMatch[0]) as {
-      title: string;
-      description: string;
-      contents: { id: string; name: string; description: string }[];
-    }[];
-
-    if (!Array.isArray(generated) || generated.length === 0) {
-      return NextResponse.json(
-        { error: "Failed to generate pages. Please try again." },
-        { status: 500 },
-      );
-    }
-
-    // Delete existing pages
-    await db.delete(pages).where(eq(pages.projectId, id));
-
-    // Insert generated pages
-    const newPages = await db
-      .insert(pages)
-      .values(
-        generated.map((p, i) => ({
-          projectId: id,
-          title: p.title,
-          description: p.description,
-          contents: p.contents,
-          order: i,
-        })),
-      )
-      .returning();
-
-    // Increment AI usage
-    await incrementUsage(userId, "aiGenerations");
-
-    return NextResponse.json({ items: newPages }, { status: 201 });
   } catch {
     return NextResponse.json(
       { error: "Something went wrong. Please try again." },

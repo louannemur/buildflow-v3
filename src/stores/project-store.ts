@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { toast } from "sonner";
+import { readSSEStream } from "@/lib/sse-client";
 import type {
   FlowStep,
   PageContent,
@@ -127,6 +128,8 @@ interface ProjectState {
   designGenerating: boolean;
   designGenCurrentPageName: string | null;
   designGenProjectId: string | null;
+  designStreamingPageId: string | null;
+  designStreamingHtml: string;
   generateAllDesigns: () => Promise<void>;
   regenerateAllDesigns: (exceptPageId: string) => Promise<void>;
   resumeDesignGeneration: () => void;
@@ -151,6 +154,8 @@ const initialState = {
   designGenerating: false,
   designGenCurrentPageName: null as string | null,
   designGenProjectId: null as string | null,
+  designStreamingPageId: null as string | null,
+  designStreamingHtml: "",
 };
 
 /* ─── Design batch runner ─────────────────────────────────────────────── */
@@ -188,10 +193,14 @@ async function runDesignBatch(
     // Stop only if explicitly cancelled (not by navigation reset)
     if (!current.designGenerating) break;
 
-    set({ designGenCurrentPageName: page.title });
+    set({
+      designGenCurrentPageName: page.title,
+      designStreamingPageId: page.id,
+      designStreamingHtml: "",
+    });
 
     try {
-      // Generate with Gemini only (skip Claude review for speed)
+      // Generate with Gemini streaming (skip Claude review for speed)
       const res = await fetch(
         `/api/projects/${projectId}/designs/generate`,
         {
@@ -200,28 +209,53 @@ async function runDesignBatch(
           body: JSON.stringify({
             pageId: page.id,
             skipReview: true,
+            stream: true,
             ...(options?.forceRegenerate && { forceRegenerate: true }),
           }),
         },
       );
 
-      if (res.ok) {
+      if (
+        res.ok &&
+        res.headers.get("content-type")?.includes("text/event-stream")
+      ) {
+        // SSE streaming path
+        await readSSEStream(res, {
+          onEvent: (event) => {
+            if (event.type === "chunk" && typeof event.text === "string") {
+              const current = useProjectStore.getState();
+              set({
+                designStreamingHtml: current.designStreamingHtml + event.text,
+              });
+            }
+            if (event.type === "done" && event.design) {
+              const design = event.design as ProjectDesign;
+              const s = useProjectStore.getState();
+              if (s.project?.id === projectId) {
+                const exists = s.designs.some((d) => d.id === design.id);
+                if (exists) s.updateDesign(design.id, design);
+                else s.addDesign(design);
+              }
+              set({ designStreamingHtml: "", designStreamingPageId: null });
+              reviewDesignInBackground(projectId, design.id);
+            }
+          },
+        });
+      } else if (res.ok) {
+        // Fallback: non-streaming JSON response
         const design = await res.json();
-        // Show design immediately in store
         const s = useProjectStore.getState();
         if (s.project?.id === projectId) {
           const exists = s.designs.some((d) => d.id === design.id);
-          if (exists) {
-            s.updateDesign(design.id, design);
-          } else {
-            s.addDesign(design);
-          }
+          if (exists) s.updateDesign(design.id, design);
+          else s.addDesign(design);
         }
-        // Fire off Claude review in background while moving to next page
+        set({ designStreamingHtml: "", designStreamingPageId: null });
         reviewDesignInBackground(projectId, design.id);
       }
     } catch {
       // Continue with remaining pages
+      set({ designStreamingHtml: "", designStreamingPageId: null });
     }
 
     completed++;
@@ -337,6 +371,8 @@ export const useProjectStore = create<ProjectState>((set) => ({
   designGenerating: false,
   designGenCurrentPageName: null,
   designGenProjectId: null,
+  designStreamingPageId: null,
+  designStreamingHtml: "",
 
   generateAllDesigns: async () => {
     const state = useProjectStore.getState();
@@ -419,6 +455,8 @@ export const useProjectStore = create<ProjectState>((set) => ({
       designGenTotal,
       designGenCurrentPageName,
       designGenProjectId,
+      designStreamingPageId,
+      designStreamingHtml,
     } = useProjectStore.getState();
 
     set({
@@ -429,6 +467,8 @@ export const useProjectStore = create<ProjectState>((set) => ({
         designGenTotal,
         designGenCurrentPageName,
         designGenProjectId,
+        designStreamingPageId,
+        designStreamingHtml,
       }),
     });
   },

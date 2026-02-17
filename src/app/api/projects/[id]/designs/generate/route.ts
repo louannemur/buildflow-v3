@@ -10,7 +10,9 @@ import {
   features,
 } from "@/lib/db/schema";
 import { getUserPlan, checkUsage, incrementUsage } from "@/lib/usage";
-import { generateDesign, inferPageType, reviewAndFixDesign } from "@/lib/ai/design";
+import { generateDesign, generateDesignStream, inferPageType, reviewAndFixDesign } from "@/lib/ai/design";
+import { extractHtmlFromResponse } from "@/lib/ai/extract-code";
+import { createSSEResponse } from "@/lib/sse";
 
 export async function POST(
   req: Request,
@@ -45,6 +47,7 @@ export async function POST(
     const forceRegenerate = body.forceRegenerate === true;
     const useStyleGuide = body.useStyleGuide !== false; // default true
     const stylePrompt: string | undefined = body.stylePrompt;
+    const wantStream = body.stream === true;
 
     if (!pageId || typeof pageId !== "string") {
       return NextResponse.json(
@@ -194,8 +197,7 @@ export async function POST(
 
     const pageType = inferPageType(page.title);
 
-    // Generate the design
-    let html = await generateDesign({
+    const generationParams = {
       projectName: project.name,
       projectDescription: project.description ?? "",
       pageName: page.title,
@@ -205,7 +207,81 @@ export async function POST(
       allPageNames,
       otherDesignHtmls,
       creativePrompt: !useStyleGuide ? stylePrompt : undefined,
-    });
+    };
+
+    // ─── Streaming path ──────────────────────────────────────────────
+    if (wantStream) {
+      return createSSEResponse(async (enqueue) => {
+        let accumulated = "";
+
+        for await (const chunk of generateDesignStream(generationParams)) {
+          accumulated += chunk.text;
+          enqueue({ type: "chunk", text: chunk.text });
+        }
+
+        const html = extractHtmlFromResponse(accumulated);
+
+        // Save the generated HTML
+        const [updated] = await db
+          .update(designs)
+          .set({ html })
+          .where(eq(designs.id, design.id))
+          .returning();
+
+        // Auto-set as style guide if no style guide exists yet
+        let isNowStyleGuide = updated.isStyleGuide;
+        if (!styleGuideCode && useStyleGuide) {
+          const existingStyleGuide = await db.query.designs.findFirst({
+            where: and(
+              eq(designs.projectId, projectId),
+              eq(designs.isStyleGuide, true),
+              eq(designs.userId, userId),
+            ),
+            columns: { id: true },
+          });
+
+          if (!existingStyleGuide) {
+            await db
+              .update(designs)
+              .set({ isStyleGuide: true })
+              .where(eq(designs.id, design.id));
+            isNowStyleGuide = true;
+          }
+        }
+
+        // Create a version snapshot
+        await db.insert(designVersions).values({
+          designId: design.id,
+          html,
+          prompt: forceRegenerate
+            ? `Regenerated${stylePrompt ? ` — ${stylePrompt}` : ""}`
+            : "Auto-generated",
+        });
+
+        await incrementUsage(userId, "designGenerations");
+
+        enqueue({
+          type: "done",
+          design: {
+            id: updated.id,
+            name: updated.name,
+            html: updated.html,
+            thumbnail: updated.thumbnail,
+            fonts: updated.fonts,
+            colors: updated.colors,
+            isStandalone: updated.isStandalone,
+            isStyleGuide: isNowStyleGuide,
+            pageId: updated.pageId,
+            createdAt: updated.createdAt.toISOString(),
+            updatedAt: updated.updatedAt.toISOString(),
+            ...(previousHtml && { previousHtml }),
+          },
+        });
+      });
+    }
+
+    // ─── Non-streaming path (unchanged) ──────────────────────────────
+    let html = await generateDesign(generationParams);
 
     // Review & fix readability issues (navbar contrast, text visibility, etc.)
     if (!skipReview) {
@@ -222,7 +298,6 @@ export async function POST(
     // Auto-set as style guide if no style guide exists yet
     let isNowStyleGuide = updated.isStyleGuide;
     if (!styleGuideCode && useStyleGuide) {
-      // Check if any style guide exists (including self)
       const existingStyleGuide = await db.query.designs.findFirst({
         where: and(
           eq(designs.projectId, projectId),

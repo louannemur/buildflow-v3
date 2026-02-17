@@ -5,6 +5,7 @@ import { anthropic } from "@/lib/ai";
 import { db } from "@/lib/db";
 import { features, userFlows, projects } from "@/lib/db/schema";
 import { getUserPlan, checkUsage, incrementUsage } from "@/lib/usage";
+import { createSSEResponse } from "@/lib/sse";
 
 const SYSTEM_PROMPT = `You are a UX designer. Given the project info and features, generate the key user flows.
 
@@ -76,56 +77,74 @@ export async function POST(
       userMessage += `\n\nFeatures:\n${projectFeatures.map((f) => `- ${f.title}: ${f.description}`).join("\n")}`;
     }
 
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 3000,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userMessage }],
+    return createSSEResponse(async (enqueue) => {
+      const stream = anthropic.messages.stream({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 3000,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: "user", content: userMessage }],
+      });
+
+      let accumulated = "";
+
+      for await (const event of stream) {
+        if (
+          event.type === "content_block_delta" &&
+          event.delta.type === "text_delta"
+        ) {
+          accumulated += event.delta.text;
+          enqueue({ type: "progress", text: event.delta.text });
+        }
+      }
+
+      const jsonMatch = accumulated.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) {
+        enqueue({
+          type: "error",
+          message: "Failed to generate flows. Please try again.",
+        });
+        return;
+      }
+
+      const generated = JSON.parse(jsonMatch[0]) as {
+        title: string;
+        steps: { id: string; title: string; description: string; type: string }[];
+      }[];
+
+      if (!Array.isArray(generated) || generated.length === 0) {
+        enqueue({
+          type: "error",
+          message: "Failed to generate flows. Please try again.",
+        });
+        return;
+      }
+
+      // Delete existing flows
+      await db.delete(userFlows).where(eq(userFlows.projectId, id));
+
+      // Insert generated flows
+      const newFlows = await db
+        .insert(userFlows)
+        .values(
+          generated.map((f, i) => ({
+            projectId: id,
+            title: f.title,
+            steps: f.steps,
+            order: i,
+          })),
+        )
+        .returning();
+
+      // Increment AI usage
+      await incrementUsage(userId, "aiGenerations");
+
+      // Emit each flow individually for animated reveal
+      for (const flow of newFlows) {
+        enqueue({ type: "item", flow });
+      }
+
+      enqueue({ type: "done", items: newFlows });
     });
-
-    const text =
-      response.content[0].type === "text" ? response.content[0].text : "";
-
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) {
-      return NextResponse.json(
-        { error: "Failed to generate flows. Please try again." },
-        { status: 500 },
-      );
-    }
-
-    const generated = JSON.parse(jsonMatch[0]) as {
-      title: string;
-      steps: { id: string; title: string; description: string; type: string }[];
-    }[];
-
-    if (!Array.isArray(generated) || generated.length === 0) {
-      return NextResponse.json(
-        { error: "Failed to generate flows. Please try again." },
-        { status: 500 },
-      );
-    }
-
-    // Delete existing flows
-    await db.delete(userFlows).where(eq(userFlows.projectId, id));
-
-    // Insert generated flows
-    const newFlows = await db
-      .insert(userFlows)
-      .values(
-        generated.map((f, i) => ({
-          projectId: id,
-          title: f.title,
-          steps: f.steps,
-          order: i,
-        })),
-      )
-      .returning();
-
-    // Increment AI usage
-    await incrementUsage(userId, "aiGenerations");
-
-    return NextResponse.json({ items: newFlows }, { status: 201 });
   } catch {
     return NextResponse.json(
       { error: "Something went wrong. Please try again." },

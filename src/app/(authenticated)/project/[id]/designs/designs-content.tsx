@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { motion } from "framer-motion";
+import { extractHtmlFromStream } from "@/lib/ai/extract-code";
 import {
   Sparkles,
   Star,
@@ -76,10 +77,29 @@ export function DesignsContent() {
     designGenTotal: genTotal,
     designGenCurrentPageName: genPageName,
     designGenProjectId: genProjectId,
+    designStreamingPageId,
+    designStreamingHtml,
     generateAllDesigns,
     resumeDesignGeneration,
   } = useProjectStore();
   const router = useRouter();
+
+  // Throttle streaming HTML updates to avoid excessive iframe re-renders
+  const [throttledHtmlState, setThrottledHtmlState] = useState("");
+  const throttledStreamHtml = designStreamingPageId ? throttledHtmlState : "";
+  const streamTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!designStreamingPageId) return;
+    if (streamTimerRef.current) return; // Already scheduled
+    streamTimerRef.current = setTimeout(() => {
+      setThrottledHtmlState(useProjectStore.getState().designStreamingHtml);
+      streamTimerRef.current = null;
+    }, 300);
+    return () => {
+      if (streamTimerRef.current) clearTimeout(streamTimerRef.current);
+      streamTimerRef.current = null;
+    };
+  }, [designStreamingPageId, designStreamingHtml]);
 
   // Scroll to item from sidebar hash navigation
   useEffect(() => {
@@ -135,11 +155,19 @@ export function DesignsContent() {
 
   // Lazy-load design HTML (excluded from initial project fetch for speed)
   const [designHtmlMap, setDesignHtmlMap] = useState<Map<string, string>>(new Map());
+  const htmlFetchedRef = useRef(false);
   useEffect(() => {
     if (!project || designs.length === 0) return;
-    // If designs already have HTML loaded (from store), use them
-    const alreadyLoaded = designs.some((d) => d.html && d.html.length > 0);
-    if (alreadyLoaded) return;
+
+    // Check if all designs already have HTML in the store
+    const designsNeedingHtml = designs.filter(
+      (d) => d.id && (!d.html || d.html.length === 0),
+    );
+    if (designsNeedingHtml.length === 0) return;
+
+    // Only fetch once per mount to avoid re-fetching during batch generation
+    if (htmlFetchedRef.current) return;
+    htmlFetchedRef.current = true;
 
     // Fetch design HTML for this project's designs
     let cancelled = false;
@@ -289,12 +317,21 @@ export function DesignsContent() {
                   ? design.html
                   : designHtmlMap.get(design.id) ?? "")
               : "";
+
+            // Check if this page is currently being streamed
+            const isStreaming = designStreamingPageId === page.id;
+            const streamPreview = isStreaming
+              ? extractHtmlFromStream(throttledStreamHtml)
+              : null;
+
             return (
               <motion.div key={page.id} id={page.id} variants={staggerItem} className="h-full">
                 <DesignCard
                   page={page}
                   design={design ? { ...design, html } : null}
                   isStyleGuide={design?.isStyleGuide ?? false}
+                  isStreaming={isStreaming}
+                  streamingHtml={streamPreview?.htmlStarted ? streamPreview.htmlContent : undefined}
                   onClick={() => handleCardClick(page.id)}
                 />
               </motion.div>
@@ -314,11 +351,15 @@ function DesignCard({
   page,
   design,
   isStyleGuide,
+  isStreaming,
+  streamingHtml,
   onClick,
 }: {
   page: ProjectPage;
   design: ProjectDesign | null;
   isStyleGuide: boolean;
+  isStreaming?: boolean;
+  streamingHtml?: string;
   onClick: () => void;
 }) {
   const hasDesign = design && design.html && design.html.length > 0;
@@ -327,6 +368,7 @@ function DesignCard({
     <Card
       className={cn(
         "group h-full cursor-pointer overflow-hidden transition-all hover:shadow-md",
+        isStreaming && "ring-2 ring-primary/40",
         isStyleGuide
           ? "border-amber-500/40 ring-1 ring-amber-500/20 hover:border-amber-500/60"
           : "hover:border-primary/50",
@@ -335,7 +377,9 @@ function DesignCard({
     >
       {/* Thumbnail area */}
       <div className="relative aspect-[16/10] w-full overflow-hidden bg-muted/50">
-        {hasDesign && design.thumbnail ? (
+        {isStreaming && streamingHtml ? (
+          <HtmlPreview html={streamingHtml} />
+        ) : hasDesign && design.thumbnail ? (
           <Image
             src={design.thumbnail}
             alt={`${page.title} design`}
@@ -344,6 +388,11 @@ function DesignCard({
           />
         ) : hasDesign ? (
           <HtmlPreview html={design.html} />
+        ) : isStreaming ? (
+          <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground/50">
+            <Loader2 className="size-6 animate-spin" />
+            <span className="text-xs font-medium">Generating...</span>
+          </div>
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground/50">
             <Wand2 className="size-8" />
