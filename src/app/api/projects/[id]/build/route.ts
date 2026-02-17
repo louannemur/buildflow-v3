@@ -8,6 +8,7 @@ import { promisify } from "util";
 import { auth } from "@/lib/auth";
 import { anthropic } from "@/lib/ai";
 import { db } from "@/lib/db";
+import { stripBfIds } from "@/lib/design/inject-bf-ids";
 import {
   projects,
   features,
@@ -450,18 +451,26 @@ export async function POST(
           description: s.description,
         })),
       })),
-      pages: projectPages.map((p) => ({
-        title: p.title,
-        description: p.description,
-        contents: p.contents,
-        designHtml: designByPageId.get(p.id)?.html || null,
-      })),
-      styleGuide,
+      pages: projectPages.map((p) => {
+        const rawHtml = designByPageId.get(p.id)?.html || null;
+        return {
+          title: p.title,
+          description: p.description,
+          contents: p.contents,
+          designHtml: rawHtml ? stripBfIds(rawHtml) : null,
+        };
+      }),
+      styleGuide: styleGuide
+        ? { ...styleGuide, html: stripBfIds(styleGuide.html) }
+        : null,
     });
 
     // Stream from Anthropic with incremental file parsing
     const encoder = new TextEncoder();
     const buildOutputId = buildOutput.id;
+    const buildStartTime = Date.now();
+    // Graceful deadline: abort AI stream 30s before maxDuration to allow saving
+    const gracefulDeadline = buildStartTime + (maxDuration - 30) * 1000;
 
     const readable = new ReadableStream({
       async start(controller) {
@@ -486,6 +495,7 @@ export async function POST(
           let currentFilePath: string | null = null;
           let fileStartContentPos = 0;
           const completedFiles: BuildFile[] = [];
+          let hitDeadline = false;
 
           const FILE_START = /===FILE:\s*(.+?)===\n/g;
           const FILE_END = "===END FILE===";
@@ -498,6 +508,13 @@ export async function POST(
 
           stream.on("text", (delta) => {
             accumulated += delta;
+
+            // Check if we're approaching the function timeout
+            if (Date.now() > gracefulDeadline && !hitDeadline) {
+              hitDeadline = true;
+              stream.abort();
+              return;
+            }
 
             // Scan for file markers from our last known position
             while (scanPos < accumulated.length) {
@@ -533,13 +550,11 @@ export async function POST(
                     content,
                   });
 
-                  // Persist files to DB periodically — survives function timeouts
-                  if (completedFiles.length === 1 || completedFiles.length % 5 === 0) {
-                    db.update(buildOutputs)
-                      .set({ files: [...completedFiles] })
-                      .where(eq(buildOutputs.id, buildOutputId))
-                      .catch(() => {});
-                  }
+                  // Persist every completed file to DB — survives function timeouts
+                  db.update(buildOutputs)
+                    .set({ files: [...completedFiles] })
+                    .where(eq(buildOutputs.id, buildOutputId))
+                    .catch(() => {});
 
                   emit({
                     type: "file_complete",
@@ -569,10 +584,15 @@ export async function POST(
             }
           });
 
-          // Wait for the stream to complete
-          await stream.finalMessage();
+          // Wait for the stream to complete (or deadline abort)
+          try {
+            await stream.finalMessage();
+          } catch (streamErr) {
+            // If we aborted due to deadline, continue with what we have
+            if (!hitDeadline) throw streamErr;
+          }
 
-          // Handle truncated last file (max_tokens reached)
+          // Handle truncated last file (max_tokens reached or deadline abort)
           if (currentFilePath) {
             const content = accumulated
               .slice(fileStartContentPos)
@@ -616,9 +636,11 @@ export async function POST(
 
           // ─── Build verification loop ─────────────────────────────
           // Skip for static HTML projects (no build step)
+          // Also skip if approaching function timeout
           let finalFiles = completedFiles;
+          const skipVerification = hitDeadline || Date.now() > gracefulDeadline;
 
-          if (parsed.data.framework !== "html") {
+          if (parsed.data.framework !== "html" && !skipVerification) {
             const currentFiles = [...completedFiles];
             let buildPassed = false;
 
