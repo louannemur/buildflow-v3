@@ -323,6 +323,30 @@ export function hexToTwClass(hex: string, prefix: "bg" | "text" | "border"): str
   return `${prefix}-[${hex}]`;
 }
 
+/** Style fields that can be individually swapped (excludes 'other'). */
+type StyleField = Exclude<keyof ParsedStyles, 'other'>;
+
+const STYLE_FIELDS: StyleField[] = [
+  'width', 'height', 'maxWidth', 'maxHeight',
+  'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+  'bgColor', 'borderWidth', 'borderColor', 'borderRadius',
+  'opacity', 'fontFamily', 'fontWeight', 'fontSize',
+  'lineHeight', 'letterSpacing', 'textAlign', 'textColor', 'shadow',
+];
+
+/**
+ * Determine which ParsedStyles field a single Tailwind class belongs to.
+ * Returns the field name, or null if the class isn't a recognized property.
+ * Used to find the "fresh" old class from current code when swapping.
+ */
+export function classifyTwClass(cls: string): StyleField | null {
+  const probe = parseTailwindClasses(cls);
+  for (const field of STYLE_FIELDS) {
+    if (probe[field]) return field;
+  }
+  return null;
+}
+
 /**
  * Extract the display value from a Tailwind class (the part after the prefix).
  * e.g. "w-full" → "full", "pt-4" → "4", "text-lg" → "lg"

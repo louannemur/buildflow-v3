@@ -22,6 +22,7 @@ import {
 import { injectBfIds, stripBfIds } from "@/lib/design/inject-bf-ids";
 import {
   parseTailwindClasses,
+  classifyTwClass,
   swapClass,
   twClassToHex,
   hexToTwClass,
@@ -305,8 +306,10 @@ export function PropertiesPanel({
   };
 
   /** Replace a single class with a new value (or add/remove).
-   *  Reads the CURRENT classes from the live source code (not the stale
-   *  selectedElement which lags behind due to async iframe tree updates). */
+   *  Reads CURRENT classes from the live source code and resolves the
+   *  fresh old class for the same category — so even if the caller passes
+   *  a stale oldClass (from the lagging iframe tree), the correct current
+   *  class is found and replaced. */
   const handleSwapClass = (
     oldClass: string | null,
     newClass: string | null,
@@ -315,7 +318,22 @@ export function PropertiesPanel({
     mutateAndSave((code) => {
       const loc = findElementInCode(code, selectedBfId);
       const currentClasses = loc?.classes ?? "";
-      const updated = swapClass(currentClasses, oldClass, newClass);
+
+      // Determine fresh old class from current code, not from stale props.
+      // Classify the class being added/removed to find its category (bgColor,
+      // textColor, fontWeight, etc.) and look up the current value for that
+      // category in the live code.
+      let freshOld = oldClass;
+      const probe = newClass || oldClass;
+      if (probe) {
+        const field = classifyTwClass(probe);
+        if (field) {
+          const freshParsed = parseTailwindClasses(currentClasses);
+          freshOld = (freshParsed[field] as string | null) ?? null;
+        }
+      }
+
+      const updated = swapClass(currentClasses, freshOld, newClass);
       if (updated !== currentClasses) {
         return updateElementClasses(code, selectedBfId, updated);
       }
@@ -646,12 +664,23 @@ export function PropertiesPanel({
             <ColorInput
               hex={borderHex}
               onChange={(hex) => {
-                const newClass = hexToTwClass(hex, "border");
-                handleSwapClass(parsed?.borderColor ?? null, newClass);
-                // Ensure border width exists
-                if (!parsed?.borderWidth) {
-                  handleSwapClass(null, "border");
-                }
+                if (!selectedBfId) return;
+                const newColorClass = hexToTwClass(hex, "border");
+                // Combined in one mutateAndSave to avoid the second call
+                // clobbering the first (React state hasn't updated yet)
+                mutateAndSave((code) => {
+                  const loc = findElementInCode(code, selectedBfId);
+                  const currentClasses = loc?.classes ?? "";
+                  const freshParsed = parseTailwindClasses(currentClasses);
+                  let updated = swapClass(currentClasses, freshParsed.borderColor, newColorClass);
+                  if (!freshParsed.borderWidth) {
+                    updated = swapClass(updated, null, "border");
+                  }
+                  if (updated !== currentClasses) {
+                    return updateElementClasses(code, selectedBfId, updated);
+                  }
+                  return code;
+                });
               }}
             />
             {svgStroke && (
