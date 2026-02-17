@@ -408,15 +408,18 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  let step = "init";
   try {
+    step = "auth";
     const session = await auth();
     if (!session?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    step = "params";
     const { id: projectId } = await params;
 
-    // Verify ownership
+    step = "project_query";
     const project = await db.query.projects.findFirst({
       where: and(
         eq(projects.id, projectId),
@@ -432,6 +435,7 @@ export async function GET(
       );
     }
 
+    step = "site_query";
     const site = await db.query.publishedSites.findFirst({
       where: eq(publishedSites.projectId, projectId),
     });
@@ -440,8 +444,7 @@ export async function GET(
       return NextResponse.json({ published: false });
     }
 
-    // Check if the published build is current
-    // Only fetch id (not files) to avoid loading huge JSON payloads
+    step = "build_query";
     const latestBuild = await db.query.buildOutputs.findFirst({
       where: and(
         eq(buildOutputs.projectId, projectId),
@@ -451,6 +454,7 @@ export async function GET(
       columns: { id: true },
     });
 
+    step = "response";
     const isStale = latestBuild ? latestBuild.id !== site.buildOutputId : false;
 
     return NextResponse.json({
@@ -463,9 +467,9 @@ export async function GET(
     });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    console.error("Publish GET error:", msg);
+    console.error(`Publish GET error at step="${step}":`, msg);
     return NextResponse.json(
-      { error: `Publish status check failed: ${msg}` },
+      { error: `Publish check failed at ${step}: ${msg}` },
       { status: 500 },
     );
   }
