@@ -391,6 +391,103 @@ Remember: ONE visual concept. Make it award-winning. Output a complete HTML docu
   return extractHtmlFromResponse(text);
 }
 
+/**
+ * Streaming variant of generateDesign — uses Gemini streaming API.
+ * Yields raw text chunks so the caller can stream them to SSE.
+ */
+export async function* generateDesignStream(
+  params: GenerateDesignParams,
+): AsyncGenerator<{ text: string }> {
+  const {
+    projectName,
+    projectDescription,
+    pageName,
+    pageType,
+    sections,
+    styleGuideCode,
+    archetype,
+    components,
+    allPageNames,
+    otherDesignHtmls,
+    creativePrompt,
+  } = params;
+
+  const pageGuidance = getPageTypeGuidance(pageType);
+
+  let styleTokenContext = "";
+  if (styleGuideCode) {
+    const tokens = extractStyleTokens(styleGuideCode);
+    styleTokenContext = `\n\n${formatTokensForPrompt(tokens)}\n\nYou MUST match these tokens exactly. Use the same font, colors, spacing, and radius.`;
+  }
+
+  let archetypeDirective = "";
+  if (archetype && archetype in DESIGN_ARCHETYPES) {
+    const info = DESIGN_ARCHETYPES[archetype as keyof typeof DESIGN_ARCHETYPES];
+    archetypeDirective = `\n\nDESIGN ARCHETYPE — ${info.label}:\n${info.promptDirective}`;
+  }
+
+  let creativeSeedContext = "";
+  if (!styleGuideCode) {
+    if (creativePrompt) {
+      creativeSeedContext = `\n\nCREATIVE DIRECTION (from the user):\n${creativePrompt}`;
+    } else {
+      const seeds = pickRandomSeeds(2);
+      creativeSeedContext = `\n\nCREATIVE DIRECTION — Pick ONE of these approaches (or ignore both and surprise me):\n${seeds.map((s, i) => `${i + 1}. ${s}`).join("\n")}`;
+    }
+  }
+
+  let componentsContext = "";
+  if (components && components.length > 0) {
+    componentsContext = `\n\nAVAILABLE COMPONENTS:\n${components.join("\n")}`;
+  }
+
+  let navigationContext = "";
+  if (allPageNames && allPageNames.length > 0) {
+    navigationContext = `\n\nPROJECT PAGES (use these as navigation links): ${allPageNames.join(", ")}`;
+  }
+
+  let consistencyContext = "";
+  if (otherDesignHtmls && otherDesignHtmls.length > 0) {
+    const summaries = otherDesignHtmls.slice(0, 3).map((d) => {
+      const tokens = extractStyleTokens(d.html);
+      return `  "${d.pageName}": font=${tokens.fonts.primary}, bg=${tokens.colors.background}, accent=${tokens.colors.accent}, radius=${tokens.borderRadius}`;
+    });
+    consistencyContext = `\n\nOTHER DESIGNED PAGES (match their style for visual consistency):\n${summaries.join("\n")}`;
+  }
+
+  const systemPrompt = `${DESIGN_SYSTEM_PROMPT}${archetypeDirective}${styleTokenContext}`;
+
+  const userMessage = `Design a ${pageType} page for "${projectName}".
+
+Project: ${projectDescription}
+Page: "${pageName}" (${pageType})
+${pageGuidance}
+
+Sections to include: ${sections.join(", ")}
+${navigationContext}${consistencyContext}${creativeSeedContext}${componentsContext}
+
+Remember: ONE visual concept. Make it award-winning. Output a complete HTML document.`;
+
+  const temperature = styleGuideCode ? 0.7 : 0.95;
+
+  const response = await ai.models.generateContentStream({
+    model: GEMINI_MODEL,
+    contents: [{ role: "user", parts: [{ text: userMessage }] }],
+    config: {
+      systemInstruction: systemPrompt,
+      temperature,
+      maxOutputTokens: 16384,
+    },
+  });
+
+  for await (const chunk of response) {
+    const text = chunk.text;
+    if (text) {
+      yield { text };
+    }
+  }
+}
+
 // ── Edit Design ──────────────────────────────────────────────────
 
 interface EditDesignParams {

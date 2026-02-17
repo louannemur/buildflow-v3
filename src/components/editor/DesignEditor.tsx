@@ -90,6 +90,7 @@ export function DesignEditor({
   // AI generation
   const {
     isGenerating,
+    generateDesignStreamAction,
     editDesignStream,
     modifyElementStream,
     addSectionAfterStream,
@@ -271,11 +272,12 @@ export function DesignEditor({
           ? "Surprise me"
           : `Generate ${config.style} design (${config.colorScheme} colors)`;
 
-      const result = await editDesignStream(
-        prompt,
-        source,
-        getHistory(designId),
-      );
+      // Use full design generation (Gemini) for initial generation,
+      // and edit (Claude) when modifying an existing design
+      const hasExistingDesign = source && source.trim().length > 0;
+      const result = hasExistingDesign
+        ? await editDesignStream(prompt, source, getHistory(designId))
+        : await generateDesignStreamAction(prompt);
 
       if (result) {
         updateSource(result);
@@ -301,7 +303,7 @@ export function DesignEditor({
         setStreamingToIframe(false);
       }
     },
-    [source, designId, buildGeneratePrompt, editDesignStream, updateSource, addMessage, getHistory, setStreamingToIframe, setSelectedBfId],
+    [source, designId, buildGeneratePrompt, editDesignStream, generateDesignStreamAction, updateSource, addMessage, getHistory, setStreamingToIframe, setSelectedBfId],
   );
 
   const handleEditDesign = useCallback(

@@ -236,6 +236,17 @@ export function useAIGenerate() {
 
   /* ─── Streaming action helpers ─────────────────────────────── */
 
+  const generateDesignStreamAction = useCallback(
+    async (
+      prompt: string,
+    ): Promise<string | null> => {
+      return generateStream("generate-design", {
+        prompt,
+      });
+    },
+    [generateStream],
+  );
+
   const editDesignStream = useCallback(
     async (
       prompt: string,
@@ -297,6 +308,7 @@ export function useAIGenerate() {
     addSectionAfter,
     // Streaming
     generateStream,
+    generateDesignStreamAction,
     editDesignStream,
     modifyElementStream,
     addSectionAfterStream,

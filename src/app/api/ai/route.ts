@@ -129,7 +129,16 @@ export async function POST(req: Request) {
 
     switch (action) {
       case "generate-design": {
-        const generated = await generateDesign(data);
+        const pageType = inferPageType(ctx.pageName);
+        const generated = await generateDesign({
+          projectName: ctx.projectName,
+          projectDescription: ctx.projectDescription,
+          pageName: ctx.pageName,
+          pageType,
+          sections: (data.sections as string[]) ?? ["Hero section", "Features", "Call to action"],
+          styleGuideCode: ctx.styleGuideCode,
+          creativePrompt: data.prompt as string | undefined,
+        });
         result = await reviewAndFixDesign(generated);
         break;
       }

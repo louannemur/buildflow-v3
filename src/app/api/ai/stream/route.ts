@@ -7,6 +7,7 @@ import {
   editDesignStream,
   modifyElementStream,
   addSectionStream,
+  generateDesignStream,
   inferPageType,
 } from "@/lib/ai/design";
 
@@ -120,6 +121,18 @@ export async function POST(req: Request) {
   let stream: AsyncGenerator<{ text: string }>;
 
   switch (action) {
+    case "generate-design":
+      stream = generateDesignStream({
+        projectName: ctx.projectName,
+        projectDescription: ctx.projectDescription,
+        pageName: ctx.pageName,
+        pageType: ctx.pageType,
+        sections: data.sections ?? ["Hero section", "Features", "Call to action"],
+        styleGuideCode: ctx.styleGuideCode,
+        creativePrompt: data.prompt,
+      });
+      break;
+
     case "edit-design":
       stream = editDesignStream({
         projectName: ctx.projectName,
