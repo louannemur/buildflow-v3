@@ -214,8 +214,8 @@ export async function POST(
     const customDomain = `${slug}.${PUBLISH_DOMAIN}`;
     const customUrl = `https://${customDomain}`;
 
-    // Reuse existing Vercel project name if available, otherwise create deterministic name
-    const vercelProjectName = existingPublish?.vercelProjectId ?? `calypso-${projectId.slice(0, 8)}`;
+    // Always use a deterministic name based on projectId (NOT the Vercel project ID)
+    const vercelProjectName = `calypso-${projectId.slice(0, 8)}`;
 
     // Upload files to Vercel
     const files = output.files as { path: string; content: string }[];
@@ -296,12 +296,13 @@ export async function POST(
     const deployment = await deployRes.json();
     const vercelProjectId = deployment.projectId ?? vercelProjectName;
 
-    // Wait for deployment to be ready (poll every 2s, up to 90s)
+    // Wait for deployment to be ready (poll every 3s, up to 90s)
     const deployId = deployment.id;
     if (deployId) {
       const maxWait = 90_000;
-      const interval = 2_000;
+      const interval = 3_000;
       const start = Date.now();
+      let deployReady = false;
 
       while (Date.now() - start < maxWait) {
         await new Promise((r) => setTimeout(r, interval));
@@ -316,11 +317,32 @@ export async function POST(
 
           if (statusRes.ok) {
             const statusData = await statusRes.json();
-            if (statusData.readyState === "READY") break;
-            if (statusData.readyState === "ERROR") {
-              console.error("Deployment failed:", statusData.readyState);
+            if (statusData.readyState === "READY") {
+              deployReady = true;
+              break;
+            }
+            if (
+              statusData.readyState === "ERROR" ||
+              statusData.readyState === "CANCELED"
+            ) {
+              const errMsg =
+                statusData.errorMessage ||
+                statusData.errorCode ||
+                "Unknown build error";
+              console.error(
+                "Vercel deployment failed:",
+                JSON.stringify({
+                  readyState: statusData.readyState,
+                  errorMessage: statusData.errorMessage,
+                  errorCode: statusData.errorCode,
+                  errorStep: statusData.errorStep,
+                  deployId,
+                }),
+              );
               return NextResponse.json(
-                { error: "Deployment failed. Please try again." },
+                {
+                  error: `Build failed on Vercel: ${errMsg}. Check your project builds correctly before publishing.`,
+                },
                 { status: 500 },
               );
             }
@@ -328,6 +350,12 @@ export async function POST(
         } catch {
           // Continue polling on network error
         }
+      }
+
+      // If polling timed out without READY, save as deploying and let user know
+      if (!deployReady) {
+        console.warn("Vercel deployment polling timed out for", deployId);
+        // Still save the record so user can check back — don't fail the request
       }
     }
 
