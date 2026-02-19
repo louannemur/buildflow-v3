@@ -919,10 +919,13 @@ export async function POST(
             // Non-fatal — don't block the build result
           }
 
+          // Don't send full file contents in the done event — the client
+          // already has all files from individual file_complete events.
+          // Sending them again creates a multi-MB JSON payload that can
+          // get truncated during SSE transmission.
           emit({
             type: "done",
             buildId: buildOutputId,
-            files: finalFiles,
             fileCount: finalFiles.length,
           });
 
@@ -952,7 +955,7 @@ export async function POST(
             try {
               controller.enqueue(
                 encoder.encode(
-                  `data: ${JSON.stringify({ type: "done", buildId: buildOutputId, files: savedFiles, fileCount: savedFiles.length })}\n\n`,
+                  `data: ${JSON.stringify({ type: "done", buildId: buildOutputId, fileCount: savedFiles.length })}\n\n`,
                 ),
               );
             } catch {
@@ -1018,9 +1021,12 @@ export async function GET(
       );
     }
 
-    // Get latest build output
+    // Get latest complete build output (skip generating/failed builds)
     const output = await db.query.buildOutputs.findFirst({
-      where: eq(buildOutputs.projectId, projectId),
+      where: and(
+        eq(buildOutputs.projectId, projectId),
+        eq(buildOutputs.status, "complete"),
+      ),
       orderBy: [desc(buildOutputs.createdAt)],
       with: {
         buildConfig: true,

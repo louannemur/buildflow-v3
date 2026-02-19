@@ -6,33 +6,19 @@ import { Send, Loader2, ArrowRight } from "lucide-react";
 import { NetworkGraph } from "@/components/features/network-graph";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
+import type { GlobalChatMessage, GlobalSuggestion } from "@/stores/global-chat-store";
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 
-export interface HomeChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  intent?: "new_project" | "new_design" | "general";
-  projectName?: string;
-  projectDescription?: string;
-}
-
-export interface DynamicSuggestion {
-  label: string;
-  action: "create_project" | "create_design" | "send_message";
-  text?: string;
-}
-
 interface HomeChatViewProps {
-  messages: HomeChatMessage[];
+  messages: GlobalChatMessage[];
   chatInput: string;
   setChatInput: (val: string) => void;
   isProcessing: boolean;
   onSubmit: (text?: string) => void;
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
-  dynamicSuggestions: DynamicSuggestion[];
-  onSuggestionClick: (s: DynamicSuggestion) => void;
+  dynamicSuggestions: GlobalSuggestion[];
+  onSuggestionClick: (s: GlobalSuggestion) => void;
   user: { name?: string | null; image?: string | null } | undefined;
   messagesEndRef: RefObject<HTMLDivElement | null>;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
@@ -93,7 +79,7 @@ function UserMessage({
 
 /* ─── Assistant message bubble ───────────────────────────────────────────── */
 
-function AssistantMessage({ message }: { message: HomeChatMessage }) {
+function AssistantMessage({ message }: { message: GlobalChatMessage }) {
   return (
     <div className="flex items-start gap-3">
       <div className="mt-0.5 size-10 shrink-0">

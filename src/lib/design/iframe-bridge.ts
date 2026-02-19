@@ -361,7 +361,11 @@ export function getIframeBridgeScript(): string {
       case 'UPDATE_STYLE': {
         var usEl = document.querySelector('[data-bf-id="' + data.bfId + '"]');
         if (usEl && data.prop) {
-          usEl.style[data.prop] = data.value || '';
+          // Convert camelCase prop to kebab-case for setProperty
+          var cssProp = data.prop.replace(/([A-Z])/g, '-$1').toLowerCase();
+          var val = (data.value || '').replace(/\\s*!important\\s*$/i, '').trim();
+          // Always use !important to override any custom CSS in the design
+          usEl.style.setProperty(cssProp, val, 'important');
         }
         break;
       }

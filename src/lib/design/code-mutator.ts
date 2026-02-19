@@ -597,9 +597,11 @@ export function moveElement(
 
 /**
  * Find the bf-ids of the previous and next sibling elements in the HTML code.
- * Siblings are determined by finding elements at the same nesting level
- * within the same parent block — not from the element tree (which can skip
- * non-bf-id wrapper elements and produce incorrect sibling relationships).
+ *
+ * Strategy: use findElementInCode to locate the element, then find its parent
+ * by walking forward from document start to track nesting. This avoids the
+ * fragile backward-walk approach that breaks on self-closing tags, style/script
+ * content, and other edge cases.
  */
 export function findCodeSiblings(code: string, bfId: string): {
   prevBfId: string | null;
@@ -608,55 +610,107 @@ export function findCodeSiblings(code: string, bfId: string): {
   const loc = findElementInCode(code, bfId);
   if (!loc) return { prevBfId: null, nextBfId: null };
 
-  // Determine the indentation of this element to find same-level siblings
-  const lineStart = code.lastIndexOf('\n', loc.start) + 1;
-  const indent = code.slice(lineStart, loc.start).match(/^\s*/)?.[0] || '';
+  // ── Find the parent's content boundaries ──────────────────────────
+  // Walk forward through code tracking open/close tags to build a nesting
+  // context at the target position. We keep a stack of tag-end positions;
+  // the top of the stack when we reach our element's start = parent content start.
 
-  // Find the parent block boundaries by looking for the enclosing tag
-  // Walk backwards from our element to find where the parent's content starts
-  let parentContentStart = 0;
-  let parentContentEnd = code.length;
+  const nonContentTags = new Set(['style', 'script']);
+  const stack: { tag: string; contentStart: number }[] = [];
+  let pos = 0;
 
-  // Walk backwards to find the parent opening tag's end (the > before our content area)
-  let depth = 0;
-  for (let i = loc.start - 1; i >= 0; i--) {
-    const ch = code[i];
-    if (ch === '>' && i > 0 && code[i - 1] !== '-') {
-      // Check if this closes an opening tag (not a closing tag like </div>)
-      // Walk back to find if this is </tag> or <tag>
-      let j = i - 1;
-      while (j >= 0 && code[j] !== '<') j--;
-      if (j >= 0) {
-        if (code[j + 1] === '/') {
-          depth++;
+  while (pos < loc.start) {
+    if (code[pos] === '<') {
+      if (code[pos + 1] === '!' && code[pos + 2] === '-' && code[pos + 3] === '-') {
+        // HTML comment — skip to -->
+        const end = code.indexOf('-->', pos + 4);
+        pos = end !== -1 ? end + 3 : code.length;
+        continue;
+      }
+
+      if (code[pos + 1] === '/') {
+        // Closing tag — pop stack
+        const end = code.indexOf('>', pos);
+        if (end !== -1) {
+          if (stack.length > 0) stack.pop();
+          pos = end + 1;
         } else {
-          if (depth > 0) {
-            depth--;
-          } else {
-            parentContentStart = i + 1;
-            break;
-          }
+          pos++;
         }
+        continue;
+      }
+
+      if (/[a-zA-Z]/.test(code[pos + 1] || '')) {
+        const tagEnd = findOpeningTagEnd(code, pos);
+        if (tagEnd !== -1) {
+          const tagStr = code.slice(pos, tagEnd + 1);
+          const isSelfClosing = tagStr.endsWith('/>');
+          const tagNameMatch = tagStr.match(/^<([a-zA-Z][a-zA-Z0-9.]*)/);
+          const tagName = tagNameMatch ? tagNameMatch[1].toLowerCase() : '';
+
+          if (!isSelfClosing) {
+            // Skip content of <style> and <script> tags entirely
+            if (nonContentTags.has(tagName)) {
+              const closeTag = `</${tagName}`;
+              const closeIdx = code.indexOf(closeTag, tagEnd + 1);
+              pos = closeIdx !== -1 ? code.indexOf('>', closeIdx) + 1 : tagEnd + 1;
+              if (pos === 0) pos = code.length; // indexOf returned -1
+              continue;
+            }
+            stack.push({ tag: tagName, contentStart: tagEnd + 1 });
+          }
+          pos = tagEnd + 1;
+        } else {
+          pos++;
+        }
+        continue;
       }
     }
+    pos++;
   }
 
-  // Walk forward from end of our element to find the parent closing tag
-  depth = 0;
+  // The parent's content starts where the top-of-stack tag's content begins
+  const parentContentStart = stack.length > 0 ? stack[stack.length - 1].contentStart : 0;
+
+  // Find parent's content end by finding the matching closing tag
+  // Walk forward from our element's end to find the closing tag at depth 0
+  let depth = 0;
+  let parentContentEnd = code.length;
+
   for (let i = loc.end; i < code.length; i++) {
     if (code[i] === '<') {
+      if (code[i + 1] === '!' && code[i + 2] === '-' && code[i + 3] === '-') {
+        const end = code.indexOf('-->', i + 4);
+        i = end !== -1 ? end + 2 : code.length;
+        continue;
+      }
+
       if (code[i + 1] === '/') {
         if (depth === 0) {
           parentContentEnd = i;
           break;
         }
         depth--;
-      } else if (code[i] === '<' && code.slice(i).match(/^<[a-zA-Z]/)) {
-        // Opening tag — find its end
+        const end = code.indexOf('>', i);
+        if (end !== -1) i = end;
+        continue;
+      }
+
+      if (/[a-zA-Z]/.test(code[i + 1] || '')) {
         const endIdx = findOpeningTagEnd(code, i);
         if (endIdx !== -1) {
           const tagStr = code.slice(i, endIdx + 1);
-          if (!tagStr.endsWith('/>')) {
+          const isSelfClosing = tagStr.endsWith('/>');
+          if (!isSelfClosing) {
+            const tagNameMatch = tagStr.match(/^<([a-zA-Z][a-zA-Z0-9.]*)/);
+            const tagName = tagNameMatch ? tagNameMatch[1].toLowerCase() : '';
+            if (nonContentTags.has(tagName)) {
+              const closeTag = `</${tagName}`;
+              const closeIdx = code.indexOf(closeTag, endIdx + 1);
+              i = closeIdx !== -1 ? code.indexOf('>', closeIdx) : endIdx;
+              if (i === -1) i = code.length;
+              continue;
+            }
             depth++;
           }
           i = endIdx;
@@ -665,25 +719,57 @@ export function findCodeSiblings(code: string, bfId: string): {
     }
   }
 
-  // Scan the parent content area for all bf-id elements at the same indent level
-  const bfIdPattern = /data-bf-id="(bf_[a-zA-Z0-9]+)"/g;
+  // ── Scan parent content for direct children (depth 0) ────────────
   const siblingBfIds: string[] = [];
-  const contentArea = code.slice(parentContentStart, parentContentEnd);
+  depth = 0;
+  pos = parentContentStart;
 
-  let match;
-  while ((match = bfIdPattern.exec(contentArea)) !== null) {
-    const foundBfId = match[1];
-    const absPos = parentContentStart + match.index;
+  while (pos < parentContentEnd) {
+    if (code[pos] === '<') {
+      if (code[pos + 1] === '!' && code[pos + 2] === '-' && code[pos + 3] === '-') {
+        const end = code.indexOf('-->', pos + 4);
+        pos = end !== -1 ? end + 3 : code.length;
+        continue;
+      }
 
-    // Check that this element is at the same indentation level
-    const foundLineStart = code.lastIndexOf('\n', absPos) + 1;
-    // Walk back to the opening < of this element
-    let openBracket = absPos;
-    while (openBracket > foundLineStart && code[openBracket] !== '<') openBracket--;
+      if (code[pos + 1] === '/') {
+        depth--;
+        const end = code.indexOf('>', pos);
+        pos = end !== -1 ? end + 1 : pos + 1;
+      } else if (/[a-zA-Z]/.test(code[pos + 1] || '')) {
+        const tagEnd = findOpeningTagEnd(code, pos);
+        if (tagEnd !== -1) {
+          const tagStr = code.slice(pos, tagEnd + 1);
+          const isSelfClosing = tagStr.endsWith('/>');
+          const tagNameMatch = tagStr.match(/^<([a-zA-Z][a-zA-Z0-9.]*)/);
+          const tagName = tagNameMatch ? tagNameMatch[1].toLowerCase() : '';
 
-    const foundIndent = code.slice(foundLineStart, openBracket).match(/^\s*/)?.[0] || '';
-    if (foundIndent === indent) {
-      siblingBfIds.push(foundBfId);
+          if (depth === 0) {
+            const bfIdMatch = tagStr.match(/data-bf-id="(bf_[a-zA-Z0-9]+)"/);
+            if (bfIdMatch) {
+              siblingBfIds.push(bfIdMatch[1]);
+            }
+          }
+
+          if (!isSelfClosing) {
+            if (nonContentTags.has(tagName)) {
+              const closeTag = `</${tagName}`;
+              const closeIdx = code.indexOf(closeTag, tagEnd + 1);
+              pos = closeIdx !== -1 ? code.indexOf('>', closeIdx) + 1 : tagEnd + 1;
+              if (pos === 0) pos = code.length;
+              continue;
+            }
+            depth++;
+          }
+          pos = tagEnd + 1;
+        } else {
+          pos++;
+        }
+      } else {
+        pos++;
+      }
+    } else {
+      pos++;
     }
   }
 

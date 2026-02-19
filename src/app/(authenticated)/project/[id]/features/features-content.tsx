@@ -18,6 +18,10 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  ThinkingAnimation,
+  FEATURES_THINKING,
+} from "@/components/features/thinking-animation";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -459,23 +463,7 @@ export function FeaturesContent() {
 
         {/* Generating skeleton */}
         {generating && features.length === 0 && (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div
-                key={i}
-                className="overflow-hidden rounded-xl border border-border/60 shadow-sm"
-              >
-                <div className="bg-primary/10 px-5 py-4">
-                  <Skeleton className="h-5 w-3/4" />
-                </div>
-                <div className="space-y-2 px-5 py-4">
-                  <Skeleton className="h-3 w-full" />
-                  <Skeleton className="h-3 w-5/6" />
-                  <Skeleton className="h-3 w-4/6" />
-                </div>
-              </div>
-            ))}
-          </div>
+          <ThinkingAnimation messages={FEATURES_THINKING} />
         )}
 
         {/* Empty state */}

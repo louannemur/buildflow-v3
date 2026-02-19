@@ -22,13 +22,14 @@ import { NetworkGraph } from "@/components/features/network-graph";
 import { UpgradeModal } from "@/components/features/upgrade-modal";
 import { ProjectCard } from "@/components/features/project-card";
 import { DesignCard } from "@/components/features/design-card";
-import {
-  HomeChatView,
-  type HomeChatMessage,
-  type DynamicSuggestion,
-} from "./home-chat-view";
+import { HomeChatView } from "./home-chat-view";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { canCreateProject, type Plan } from "@/lib/plan-limits";
+import {
+  useGlobalChatStore,
+  type GlobalChatMessage,
+  type GlobalSuggestion,
+} from "@/stores/global-chat-store";
 import { cn } from "@/lib/utils";
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
@@ -109,15 +110,19 @@ export function HomeContent() {
   const { user, isLoading: authLoading } = useCurrentUser();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Mode (hero → chat on first message)
-  const [mode, setMode] = useState<HomeMode>("hero");
+  // Global chat store
+  const messages = useGlobalChatStore((s) => s.messages);
+  const isProcessing = useGlobalChatStore((s) => s.isProcessing);
+  const dynamicSuggestions = useGlobalChatStore((s) => s.suggestions);
 
-  // Chat state
+  // Mode (hero → chat on first message)
+  // If there are already messages in the global store, start in chat mode
+  const [mode, setMode] = useState<HomeMode>(() =>
+    useGlobalChatStore.getState().messages.length > 0 ? "chat" : "hero",
+  );
+
+  // Local input state (input buffer only)
   const [chatInput, setChatInput] = useState("");
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [messages, setMessages] = useState<HomeChatMessage[]>([]);
-  const [dynamicSuggestions, setDynamicSuggestions] = useState<DynamicSuggestion[]>([]);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Upgrade modal
   const [upgradeOpen, setUpgradeOpen] = useState(false);
@@ -130,6 +135,7 @@ export function HomeContent() {
   const recentsCache = useRef<Partial<Record<Tab, RecentItem[]>>>({});
   const recentsRef = useRef<HTMLDivElement>(null);
   const recentsMinHeight = useRef(0);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // ─── Auto-scroll chat (within container only) ───────────────────────
 
@@ -139,6 +145,13 @@ export function HomeContent() {
       if (container) {
         container.scrollTop = container.scrollHeight;
       }
+    }
+  }, [messages.length, mode]);
+
+  // Switch to chat mode when messages appear
+  useEffect(() => {
+    if (messages.length > 0 && mode === "hero") {
+      setMode("chat");
     }
   }, [messages.length, mode]);
 
@@ -239,26 +252,7 @@ export function HomeContent() {
     }
 
     const design = await res.json();
-    router.push(`/design/${design.id}`);
-  }
-
-  // ─── Add assistant message helper ─────────────────────────────────────
-
-  function addAssistantMessage(
-    content: string,
-    intent: "new_project" | "new_design" | "general",
-    projectName?: string,
-    projectDescription?: string,
-  ) {
-    const msg: HomeChatMessage = {
-      id: `msg-${Date.now()}-assistant`,
-      role: "assistant",
-      content,
-      intent,
-      projectName,
-      projectDescription,
-    };
-    setMessages((prev) => [...prev, msg]);
+    router.push(`/design/${design.id}?autoGenerate=true`);
   }
 
   // ─── Chat submit ──────────────────────────────────────────────────────
@@ -267,26 +261,28 @@ export function HomeContent() {
     const message = (text ?? chatInput).trim();
     if (!message || isProcessing) return;
 
-    // Add user message
-    const userMsg: HomeChatMessage = {
+    const store = useGlobalChatStore.getState();
+
+    // Add user message to global store
+    const userMsg: GlobalChatMessage = {
       id: `msg-${Date.now()}-user`,
       role: "user",
       content: message,
     };
-    setMessages((prev) => [...prev, userMsg]);
+    store.addMessage(userMsg);
+    store.setSuggestions([]);
     setChatInput("");
-    setDynamicSuggestions([]);
 
     // Transition to chat mode on first message
     if (mode === "hero") {
       setMode("chat");
     }
 
-    setIsProcessing(true);
+    store.setProcessing(true);
 
     try {
-      // Build conversation history from existing messages (user + assistant content only)
-      const history = messages.map((m) => ({
+      // Build conversation history from global store
+      const history = store.messages.map((m) => ({
         role: m.role,
         content: m.content,
       }));
@@ -298,32 +294,32 @@ export function HomeContent() {
       });
 
       if (!res.ok) {
-        addAssistantMessage(
-          "Something went wrong. Please try again.",
-          "general",
-        );
+        store.addMessage({
+          id: `msg-${Date.now()}-err`,
+          role: "assistant",
+          content: "Something went wrong. Please try again.",
+          intent: "general",
+        });
         return;
       }
 
       const data = await res.json();
       const aiSuggestions: string[] = data.suggestions ?? [];
 
-      // Build dynamic suggestion chips from AI response
       // Only show the action button after at least one follow-up exchange
-      const hasEnoughContext = messages.length >= 3; // user→AI→user (+ this AI response coming)
+      const hasEnoughContext = store.messages.length >= 3;
 
       function buildSuggestions(
         intent: string,
         suggestions: string[],
         actionName?: string,
-      ): DynamicSuggestion[] {
-        const chips: DynamicSuggestion[] = suggestions.map((s) => ({
+      ): GlobalSuggestion[] {
+        const chips: GlobalSuggestion[] = suggestions.map((s) => ({
           label: s,
           action: "send_message" as const,
           text: s,
         }));
 
-        // Only show "go" action after enough conversation
         if (hasEnoughContext) {
           if (intent === "new_project") {
             chips.push({ label: "Build everything", action: "create_project", text: actionName });
@@ -337,30 +333,36 @@ export function HomeContent() {
 
       switch (data.intent) {
         case "new_project": {
-          addAssistantMessage(
-            data.message || `I'd love to help you build **${data.name || "your project"}**!`,
-            "new_project",
-            data.name,
-            data.description,
-          );
-          setDynamicSuggestions(buildSuggestions("new_project", aiSuggestions, data.name));
+          store.addMessage({
+            id: `msg-${Date.now()}-ast`,
+            role: "assistant",
+            content: data.message || `I'd love to help you build **${data.name || "your project"}**!`,
+            intent: "new_project",
+            projectName: data.name,
+            projectDescription: data.description,
+          });
+          store.setSuggestions(buildSuggestions("new_project", aiSuggestions, data.name));
           break;
         }
         case "new_design": {
-          addAssistantMessage(
-            data.message || `Let's design **${data.name || "your design"}**!`,
-            "new_design",
-            data.name,
-          );
-          setDynamicSuggestions(buildSuggestions("new_design", aiSuggestions, data.name));
+          store.addMessage({
+            id: `msg-${Date.now()}-ast`,
+            role: "assistant",
+            content: data.message || `Let's design **${data.name || "your design"}**!`,
+            intent: "new_design",
+            projectName: data.name,
+          });
+          store.setSuggestions(buildSuggestions("new_design", aiSuggestions, data.name));
           break;
         }
         case "general": {
-          addAssistantMessage(
-            data.message || "Try describing a project or design you'd like to create!",
-            "general",
-          );
-          setDynamicSuggestions(
+          store.addMessage({
+            id: `msg-${Date.now()}-ast`,
+            role: "assistant",
+            content: data.message || "Try describing a project or design you'd like to create!",
+            intent: "general",
+          });
+          store.setSuggestions(
             aiSuggestions.length > 0
               ? aiSuggestions.map((s) => ({ label: s, action: "send_message" as const, text: s }))
               : [
@@ -372,12 +374,14 @@ export function HomeContent() {
         }
       }
     } catch {
-      addAssistantMessage(
-        "Something went wrong. Please try again.",
-        "general",
-      );
+      useGlobalChatStore.getState().addMessage({
+        id: `msg-${Date.now()}-err`,
+        role: "assistant",
+        content: "Something went wrong. Please try again.",
+        intent: "general",
+      });
     } finally {
-      setIsProcessing(false);
+      useGlobalChatStore.getState().setProcessing(false);
     }
   }
 
@@ -390,34 +394,36 @@ export function HomeContent() {
 
   // ─── Dynamic suggestion handler ────────────────────────────────────────
 
-  async function handleSuggestionClick(suggestion: DynamicSuggestion) {
+  async function handleSuggestionClick(suggestion: GlobalSuggestion) {
     switch (suggestion.action) {
       case "create_project": {
-        const lastProjectMsg = [...messages]
+        const store = useGlobalChatStore.getState();
+        const lastProjectMsg = [...store.messages]
           .reverse()
           .find((m) => m.role === "assistant" && m.intent === "new_project");
-        const history = messages.map((m) => ({
+        const history = store.messages.map((m) => ({
           role: m.role,
           content: m.content,
         }));
-        setIsProcessing(true);
+        store.setProcessing(true);
         await createProject(
           lastProjectMsg?.projectName || suggestion.text || "Untitled Project",
           lastProjectMsg?.projectDescription,
           history,
         );
-        setIsProcessing(false);
+        store.setProcessing(false);
         break;
       }
       case "create_design": {
-        const lastDesignMsg = [...messages]
+        const store = useGlobalChatStore.getState();
+        const lastDesignMsg = [...store.messages]
           .reverse()
           .find((m) => m.role === "assistant" && m.intent === "new_design");
-        setIsProcessing(true);
+        store.setProcessing(true);
         await createDesign(
           lastDesignMsg?.projectName || suggestion.text || "Untitled Design",
         );
-        setIsProcessing(false);
+        store.setProcessing(false);
         break;
       }
       case "send_message": {

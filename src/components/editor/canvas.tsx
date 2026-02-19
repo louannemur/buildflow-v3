@@ -1,20 +1,24 @@
 "use client";
 
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useCallback, useState, useMemo } from "react";
 import { X } from "lucide-react";
 import { useEditorStore, BREAKPOINT_WIDTHS } from "@/lib/editor/store";
 import type { EditorElement } from "@/lib/editor/store";
 import { generatePreviewHtml, prepareHtmlForPreview, isHtmlDocument } from "@/lib/design/preview-transform";
+import { findCodeSiblings } from "@/lib/design/code-mutator";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 import { SelectionOverlay } from "./SelectionOverlay";
+import type { StreamPhase } from "@/hooks/useAIGenerate";
+import { ThinkingAnimation, DESIGN_THINKING } from "@/components/features/thinking-animation";
 
 interface CanvasProps {
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
   onMoveElement?: (bfId: string, targetBfId: string, position: 'before' | 'after') => void;
+  streamPhase?: StreamPhase;
 }
 
-export function Canvas({ iframeRef, onMoveElement }: CanvasProps) {
+export function Canvas({ iframeRef, onMoveElement, streamPhase }: CanvasProps) {
   const readyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reloadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevBlobUrlRef = useRef<string | null>(null);
@@ -60,112 +64,63 @@ export function Canvas({ iframeRef, onMoveElement }: CanvasProps) {
     return () => ro.disconnect();
   }, [recalcScale]);
 
-  // ─── Drag-to-reorder state ─────────────────────────────────────────────
-  const [isDragging, setIsDragging] = useState(false);
-  const [dropIndicator, setDropIndicator] = useState<{ y: number; width: number; left: number } | null>(null);
-  const dropTargetRef = useRef<{ bfId: string; position: 'before' | 'after' } | null>(null);
-  const dragBfIdRef = useRef<string | null>(null);
+  // ─── Move element up/down (arrow-based reorder) ───────────────────────
+  // Primary: siblings from HTML code structure (depth-tracking).
+  // Fallback: element tree (parentBfId) when code-based detection fails.
 
-  const handleDragStart = useCallback((e: React.MouseEvent) => {
-    const draggedEl = useEditorStore.getState().selectedElement;
-    if (!draggedEl) return;
+  const selectedBfIdForMove = selectedElement?.bfId ?? null;
+  const elementTree = useEditorStore((s) => s.elementTree);
 
-    e.preventDefault();
-    setIsDragging(true);
-    dragBfIdRef.current = draggedEl.bfId;
+  const siblings = useMemo(() => {
+    if (!selectedBfIdForMove) return { prevBfId: null, nextBfId: null };
 
-    const handleMouseMove = (ev: MouseEvent) => {
-      const inner = innerRef.current;
-      if (!inner) return;
-
-      // Convert mouse position to iframe coordinates
-      const rect = inner.getBoundingClientRect();
-      const iframeY = (ev.clientY - rect.top) / scale;
-
-      const state = useEditorStore.getState();
-      const dragged = state.elementTree.find((el) => el.bfId === dragBfIdRef.current);
-      if (!dragged) return;
-
-      // Find siblings (same parent, exclude dragged element)
-      const siblings = state.elementTree.filter(
-        (el) => el.parentBfId === dragged.parentBfId && el.bfId !== dragged.bfId,
-      );
-      siblings.sort((a, b) => a.rect.top - b.rect.top);
-
-      if (siblings.length === 0) {
-        dropTargetRef.current = null;
-        setDropIndicator(null);
-        return;
-      }
-
-      // Find drop position based on cursor Y
-      let target: EditorElement | null = null;
-      let position: 'before' | 'after' = 'before';
-
-      for (const sibling of siblings) {
-        const midY = sibling.rect.top + sibling.rect.height / 2;
-        if (iframeY < midY) {
-          target = sibling;
-          position = 'before';
-          break;
+    // Primary: element tree (uses actual DOM parent-child relationships via children array)
+    if (elementTree.length > 0) {
+      const selectedEl = elementTree.find((el) => el.bfId === selectedBfIdForMove);
+      if (selectedEl?.parentBfId) {
+        const parentEl = elementTree.find((el) => el.bfId === selectedEl.parentBfId);
+        if (parentEl?.children && parentEl.children.length > 1) {
+          const idx = parentEl.children.indexOf(selectedBfIdForMove);
+          if (idx !== -1) {
+            return {
+              prevBfId: idx > 0 ? parentEl.children[idx - 1] : null,
+              nextBfId: idx < parentEl.children.length - 1 ? parentEl.children[idx + 1] : null,
+            };
+          }
         }
       }
-
-      if (!target) {
-        target = siblings[siblings.length - 1];
-        position = 'after';
+      // Fallback within tree: filter by parentBfId (for elements whose parent lacks children data)
+      if (selectedEl) {
+        const parentId = selectedEl.parentBfId;
+        const treeSiblings = elementTree.filter((el) => el.parentBfId === parentId);
+        if (treeSiblings.length > 1) {
+          const idx = treeSiblings.findIndex((el) => el.bfId === selectedBfIdForMove);
+          return {
+            prevBfId: idx > 0 ? treeSiblings[idx - 1].bfId : null,
+            nextBfId: idx >= 0 && idx < treeSiblings.length - 1 ? treeSiblings[idx + 1].bfId : null,
+          };
+        }
       }
+    }
 
-      // Check if this would result in no change
-      const allChildren = state.elementTree
-        .filter((el) => el.parentBfId === dragged.parentBfId)
-        .sort((a, b) => a.rect.top - b.rect.top);
-      const draggedIndex = allChildren.findIndex((el) => el.bfId === dragged.bfId);
-      const targetIndex = allChildren.findIndex((el) => el.bfId === target!.bfId);
+    // Secondary: code-based siblings (for when element tree isn't available yet)
+    if (source) {
+      const codeSibs = findCodeSiblings(source, selectedBfIdForMove);
+      if (codeSibs.prevBfId || codeSibs.nextBfId) return codeSibs;
+    }
 
-      const isNoOp =
-        (position === 'before' && draggedIndex === targetIndex - 1) ||
-        (position === 'after' && draggedIndex === targetIndex + 1) ||
-        (position === 'before' && draggedIndex === 0 && targetIndex === 0) ||
-        (position === 'after' && draggedIndex === allChildren.length - 1 && targetIndex === allChildren.length - 1);
+    return { prevBfId: null, nextBfId: null };
+  }, [source, elementTree, selectedBfIdForMove]);
 
-      if (isNoOp) {
-        dropTargetRef.current = null;
-        setDropIndicator(null);
-        return;
-      }
+  const handleMoveUp = useCallback(() => {
+    if (!siblings.prevBfId || !selectedBfIdForMove || !onMoveElement) return;
+    onMoveElement(selectedBfIdForMove, siblings.prevBfId, 'before');
+  }, [selectedBfIdForMove, siblings.prevBfId, onMoveElement]);
 
-      dropTargetRef.current = { bfId: target.bfId, position };
-
-      // Calculate indicator line position
-      const lineY = position === 'before' ? target.rect.top : target.rect.top + target.rect.height;
-      const parentEl = state.elementTree.find((el) => el.bfId === dragged.parentBfId);
-      const lineWidth = parentEl ? parentEl.rect.width : target.rect.width;
-      const lineLeft = parentEl ? parentEl.rect.left : target.rect.left;
-
-      setDropIndicator({ y: lineY, width: lineWidth, left: lineLeft });
-    };
-
-    const handleMouseUp = () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-
-      setIsDragging(false);
-      setDropIndicator(null);
-
-      const bfId = dragBfIdRef.current;
-      const drop = dropTargetRef.current;
-      dragBfIdRef.current = null;
-      dropTargetRef.current = null;
-
-      if (bfId && drop && onMoveElement) {
-        onMoveElement(bfId, drop.bfId, drop.position);
-      }
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-  }, [scale, onMoveElement]);
+  const handleMoveDown = useCallback(() => {
+    if (!siblings.nextBfId || !selectedBfIdForMove || !onMoveElement) return;
+    onMoveElement(selectedBfIdForMove, siblings.nextBfId, 'after');
+  }, [selectedBfIdForMove, siblings.nextBfId, onMoveElement]);
 
   // Build and write preview to iframe
   useEffect(() => {
@@ -405,38 +360,38 @@ export function Canvas({ iframeRef, onMoveElement }: CanvasProps) {
             transformOrigin: "top left",
           }}
         >
-          {source ? (
-            <>
-              <iframe
-                ref={iframeRef}
-                title="Design canvas"
-                className="block h-full w-full border-none"
-                sandbox="allow-scripts allow-same-origin"
-                tabIndex={-1}
-              />
-              {mode === "design" && (
-                <SelectionOverlay
-                  selectedElement={selectedElement}
-                  hoveredElement={hoveredElement}
-                  onDragStart={handleDragStart}
-                  dropIndicator={dropIndicator}
-                />
-              )}
-              {/* Transparent overlay to capture mouse events during drag (iframe blocks them otherwise) */}
-              {isDragging && (
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    zIndex: 50,
-                    cursor: "grabbing",
-                    userSelect: "none",
-                  }}
-                />
-              )}
-            </>
-          ) : (
-            <div className="flex h-full w-full items-center justify-center">
+          {/* iframe is always in the DOM so doc.write() streaming works */}
+          <iframe
+            ref={iframeRef}
+            title="Design canvas"
+            className={cn(
+              "block h-full w-full border-none",
+              !source && !isStreamingToIframe && "invisible",
+            )}
+            sandbox="allow-scripts allow-same-origin"
+            tabIndex={-1}
+          />
+          {source && mode === "design" && (
+            <SelectionOverlay
+              selectedElement={selectedElement}
+              hoveredElement={hoveredElement}
+              canMoveUp={!!siblings.prevBfId}
+              canMoveDown={!!siblings.nextBfId}
+              onMoveUp={handleMoveUp}
+              onMoveDown={handleMoveDown}
+            />
+          )}
+
+          {/* ThinkingAnimation overlay — shown while generating before HTML starts streaming */}
+          {!source && !isStreamingToIframe && streamPhase && streamPhase !== "idle" && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-white">
+              <ThinkingAnimation messages={DESIGN_THINKING} />
+            </div>
+          )}
+
+          {/* Empty state — no design, not generating */}
+          {!source && (!streamPhase || streamPhase === "idle") && !isStreamingToIframe && (
+            <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-center">
                 <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-xl bg-muted">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-muted-foreground">

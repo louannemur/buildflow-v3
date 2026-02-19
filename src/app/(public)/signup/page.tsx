@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -139,6 +139,18 @@ export default function SignupPage() {
     setOauthLoading(provider);
     signIn(provider, { callbackUrl: "/home" });
   }
+
+  // Reset loading state when user navigates back (bfcache restore)
+  useEffect(() => {
+    const handlePageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) {
+        setOauthLoading(null);
+        setIsLoading(false);
+      }
+    };
+    window.addEventListener("pageshow", handlePageShow);
+    return () => window.removeEventListener("pageshow", handlePageShow);
+  }, []);
 
   const isDisabled = isLoading || !!oauthLoading;
 

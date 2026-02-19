@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useGlobalChatStore } from "@/stores/global-chat-store";
 import {
   replaceElement,
   insertAfterElement,
@@ -169,7 +170,9 @@ const initialState = {
  * For legacy JSX, bf-ids are injected/stripped on the fly.
  */
 function sourceWithBfIds(source: string): string {
-  if (isHtmlDocument(source) && !source.includes('data-bf-id=')) {
+  if (isHtmlDocument(source)) {
+    // Always run ensureBfIds — it's a no-op for elements that already have IDs
+    // but ensures newly-inserted elements (from AI edits, mutations, etc.) get IDs too.
     return ensureBfIds(source);
   }
   return source;
@@ -276,8 +279,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   // ─── Panels ─────────────────────────────────────────────────
   toggleLayers: () => set((s) => ({ showLayers: !s.showLayers })),
   toggleProperties: () => set((s) => ({ showProperties: !s.showProperties })),
-  toggleChat: () => set((s) => ({ showChat: !s.showChat })),
-  setShowChat: (show) => set({ showChat: show }),
+  toggleChat: () => {
+    useGlobalChatStore.getState().toggle();
+    set((s) => ({ showChat: !s.showChat }));
+  },
+  setShowChat: (show) => {
+    useGlobalChatStore.getState().setOpen(show);
+    set({ showChat: show });
+  },
   toggleHistory: () => set((s) => ({ showHistory: !s.showHistory })),
 
   // ─── Undo/Redo ──────────────────────────────────────────────

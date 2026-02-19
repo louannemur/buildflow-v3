@@ -7,6 +7,7 @@ import { DESIGN_ARCHETYPES } from "@/lib/design/design-archetypes";
 import {
   extractStyleTokens,
   formatTokensForPrompt,
+  extractNavigationHtml,
 } from "@/lib/design/style-extractor";
 import { extractHtmlFromResponse } from "./extract-code";
 
@@ -62,16 +63,15 @@ Avoid the "centered stack of sections" pattern. Real sites use tension:
 - Vary section padding: py-16, py-24, py-32, py-40. Never the same twice in a row
 - Left-align body text. Center-align only standalone headlines or CTAs
 
-[Responsive — every design MUST work on all screens]:
-Design MOBILE-FIRST. Every layout must be usable on 375px screens and scale up.
-- Grid columns collapse on mobile: grid-cols-1 by default, sm:grid-cols-2, lg:grid-cols-3 etc. NEVER use multi-column grids without responsive breakpoints
-- Hero headlines scale down: text-3xl sm:text-4xl lg:text-6xl. NEVER use a fixed text-7xl that overflows on mobile
-- Navigation: use a simple horizontal nav that wraps or a hamburger pattern on mobile. NEVER let nav links overflow horizontally
-- Images and containers: use w-full and max-w-full so nothing overflows. NEVER use fixed pixel widths (w-[800px]) without responsive alternatives
-- Padding/margins: use responsive values — px-4 sm:px-6 lg:px-8. NEVER use large fixed padding (px-20) that wastes mobile space
-- Flexbox layouts: use flex-col on mobile, sm:flex-row or lg:flex-row for desktop. NEVER assume side-by-side layout works at all sizes
-- Touch targets: buttons and links must be at least h-10 (40px) with sufficient tap spacing on mobile
-- Test your mental model: if you put two items side-by-side, ask "does this work at 375px wide?" If not, stack them on mobile
+[Responsive — design for DESKTOP first, then ensure it works on mobile]:
+Your PRIMARY canvas is a wide desktop screen (1280px+). Design expansive, visually rich layouts that use the full width — multi-column grids, asymmetric splits, generous whitespace. Then add Tailwind responsive prefixes so it degrades gracefully on smaller screens.
+- Use multi-column grids at desktop and collapse on mobile: lg:grid-cols-3 sm:grid-cols-2 grid-cols-1. Always include the responsive breakpoints
+- Hero headlines are large at desktop and scale down: text-3xl sm:text-4xl lg:text-6xl
+- Navigation: full horizontal nav on desktop, collapsible on mobile
+- Images and containers: use max-w-7xl or max-w-6xl centered containers with w-full inside. NEVER use fixed pixel widths without responsive alternatives
+- Padding/margins: use responsive values — px-4 sm:px-6 lg:px-8. Use generous desktop padding (lg:py-32, lg:px-16)
+- Flexbox layouts: flex-col on mobile, sm:flex-row or lg:flex-row for desktop
+- Touch targets: buttons and links must be at least h-10 (40px)
 
 [Motion — subtle, not showy]:
 Use GSAP + ScrollTrigger for scroll reveals, CSS transitions for hover states, and IntersectionObserver for simple appear-on-scroll effects. Less is more — not everything needs to animate.
@@ -138,8 +138,9 @@ STRUCTURE:
 10. White space is a feature, not a bug. Sections with generous py-32 or py-40 and minimal content feel intentional and premium. Cramming content into every pixel feels cheap.
 11. Body text, descriptions, and card content are NEVER larger than text-base (1rem/16px). The ONLY exception is a single hero subtitle which may be text-lg. If you used text-xl or text-2xl on a paragraph or description, you failed.
 12. Card/feature titles max out at text-lg. Use font-semibold for hierarchy, not bigger sizes. Section headings (h2) max out at text-3xl. The hero headline is the ONLY text that gets to be huge.
-13. Every grid, flex layout, and text size MUST have responsive breakpoints. A design that breaks on mobile is a failed design. Use Tailwind responsive prefixes (sm:, md:, lg:) on ALL multi-column layouts and large text sizes.
-14. No horizontal overflow. Nothing should cause a horizontal scrollbar at any viewport width. No fixed-width elements wider than the viewport, no grids that don't collapse, no padding that pushes content off-screen.`;
+13. Every grid, flex layout, and text size MUST have responsive breakpoints. Use Tailwind responsive prefixes (sm:, md:, lg:) on ALL multi-column layouts and large text sizes so they degrade on small screens.
+14. No horizontal overflow on any viewport. No fixed-width elements wider than the viewport, no grids that don't collapse, no padding that pushes content off-screen.
+15. Design for DESKTOP WIDTH. The layout should look expansive and premium at 1280px+. Use wide multi-column grids, asymmetric splits, generous horizontal spacing. Do NOT produce a narrow, single-column mobile layout — that's not what the user sees first.`;
 
 const EDIT_DESIGN_PROMPT = `You are editing an existing design. Focus on iterative improvements while maintaining the existing design structure.
 
@@ -322,7 +323,7 @@ export async function generateDesign(
   let styleTokenContext = "";
   if (styleGuideCode) {
     const tokens = extractStyleTokens(styleGuideCode);
-    styleTokenContext = `\n\n${formatTokensForPrompt(tokens)}\n\nYou MUST match these tokens exactly. Use the same font, colors, spacing, and radius.`;
+    styleTokenContext = `\n\n${formatTokensForPrompt(tokens)}\n\nIMPORTANT: These tokens come from the project's STYLE GUIDE — the single source of truth for this project's visual identity. You MUST use the exact same font, color palette, spacing rhythm, and border radius. Do NOT invent a new visual style or deviate from these tokens.`;
   }
 
   let archetypeDirective = "";
@@ -346,16 +347,28 @@ export async function generateDesign(
     componentsContext = `\n\nAVAILABLE COMPONENTS:\n${components.join("\n")}`;
   }
 
-  // Navigation context — all pages in the project for proper nav links
-  let navigationContext = "";
+  // Page list context — all pages in the project for proper nav links
+  let pageListContext = "";
   if (allPageNames && allPageNames.length > 0) {
-    navigationContext = `\n\nPROJECT PAGES (use these as navigation links): ${allPageNames.join(", ")}`;
+    pageListContext = `\n\nPROJECT PAGES (use these as navigation links): ${allPageNames.join(", ")}`;
+  }
+
+  // Navigation HTML from style guide — replicate exact nav bar structure
+  let navHtmlContext = "";
+  if (styleGuideCode) {
+    const navHtml = extractNavigationHtml(styleGuideCode);
+    if (navHtml) {
+      navHtmlContext = `\n\nSTYLE GUIDE NAVIGATION (replicate this exact nav bar structure, links, and styling on this page):\n\`\`\`html\n${navHtml}\n\`\`\``;
+    }
   }
 
   // Style consistency context — compact token summaries from other designed pages
+  // ONLY include when there's no style guide. When a style guide exists, it IS the
+  // source of truth — other pages may still be in a stale/old style and would
+  // contradict the style guide tokens, confusing the AI.
   let consistencyContext = "";
-  if (otherDesignHtmls && otherDesignHtmls.length > 0) {
-    const summaries = otherDesignHtmls.slice(0, 3).map((d) => {
+  if (!styleGuideCode && otherDesignHtmls && otherDesignHtmls.length > 0) {
+    const summaries = otherDesignHtmls.slice(0, 8).map((d) => {
       const tokens = extractStyleTokens(d.html);
       return `  "${d.pageName}": font=${tokens.fonts.primary}, bg=${tokens.colors.background}, accent=${tokens.colors.accent}, radius=${tokens.borderRadius}`;
     });
@@ -371,8 +384,8 @@ Page: "${pageName}" (${pageType})
 ${pageGuidance}
 
 Sections to include: ${sections.join(", ")}
-${navigationContext}${consistencyContext}${creativeSeedContext}${componentsContext}
-
+${pageListContext}${navHtmlContext}${consistencyContext}${creativeSeedContext}${componentsContext}
+${styleGuideCode ? "\nThis page MUST follow the style guide tokens above — same font, same colors, same spacing. Only the page content/layout differs." : ""}
 Remember: ONE visual concept. Make it award-winning. Output a complete HTML document.`;
 
   const temperature = styleGuideCode ? 0.7 : 0.95;
@@ -417,7 +430,7 @@ export async function* generateDesignStream(
   let styleTokenContext = "";
   if (styleGuideCode) {
     const tokens = extractStyleTokens(styleGuideCode);
-    styleTokenContext = `\n\n${formatTokensForPrompt(tokens)}\n\nYou MUST match these tokens exactly. Use the same font, colors, spacing, and radius.`;
+    styleTokenContext = `\n\n${formatTokensForPrompt(tokens)}\n\nIMPORTANT: These tokens come from the project's STYLE GUIDE — the single source of truth for this project's visual identity. You MUST use the exact same font, color palette, spacing rhythm, and border radius. Do NOT invent a new visual style or deviate from these tokens.`;
   }
 
   let archetypeDirective = "";
@@ -441,14 +454,23 @@ export async function* generateDesignStream(
     componentsContext = `\n\nAVAILABLE COMPONENTS:\n${components.join("\n")}`;
   }
 
-  let navigationContext = "";
+  let pageListContext = "";
   if (allPageNames && allPageNames.length > 0) {
-    navigationContext = `\n\nPROJECT PAGES (use these as navigation links): ${allPageNames.join(", ")}`;
+    pageListContext = `\n\nPROJECT PAGES (use these as navigation links): ${allPageNames.join(", ")}`;
   }
 
+  let navHtmlContext = "";
+  if (styleGuideCode) {
+    const navHtml = extractNavigationHtml(styleGuideCode);
+    if (navHtml) {
+      navHtmlContext = `\n\nSTYLE GUIDE NAVIGATION (replicate this exact nav bar structure, links, and styling on this page):\n\`\`\`html\n${navHtml}\n\`\`\``;
+    }
+  }
+
+  // Only include consistency context when there's no style guide (see comment above)
   let consistencyContext = "";
-  if (otherDesignHtmls && otherDesignHtmls.length > 0) {
-    const summaries = otherDesignHtmls.slice(0, 3).map((d) => {
+  if (!styleGuideCode && otherDesignHtmls && otherDesignHtmls.length > 0) {
+    const summaries = otherDesignHtmls.slice(0, 8).map((d) => {
       const tokens = extractStyleTokens(d.html);
       return `  "${d.pageName}": font=${tokens.fonts.primary}, bg=${tokens.colors.background}, accent=${tokens.colors.accent}, radius=${tokens.borderRadius}`;
     });
@@ -464,8 +486,8 @@ Page: "${pageName}" (${pageType})
 ${pageGuidance}
 
 Sections to include: ${sections.join(", ")}
-${navigationContext}${consistencyContext}${creativeSeedContext}${componentsContext}
-
+${pageListContext}${navHtmlContext}${consistencyContext}${creativeSeedContext}${componentsContext}
+${styleGuideCode ? "\nThis page MUST follow the style guide tokens above — same font, same colors, same spacing. Only the page content/layout differs." : ""}
 Remember: ONE visual concept. Make it award-winning. Output a complete HTML document.`;
 
   const temperature = styleGuideCode ? 0.7 : 0.95;

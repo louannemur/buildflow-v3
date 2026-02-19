@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect, useCallback, useMemo } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -24,6 +24,10 @@ import {
   type ConversationSummary,
 } from "@/stores/global-chat-store";
 import { useProjectStore } from "@/stores/project-store";
+import { useEditorStore } from "@/lib/editor/store";
+import { useMentionSystem } from "@/hooks/useMentionSystem";
+import type { ReferenceOption } from "@/lib/design/reference-resolver";
+import { readSSEStream } from "@/lib/sse-client";
 
 /* ─── Route helpers ───────────────────────────────────────────────────────── */
 
@@ -96,6 +100,22 @@ function timeAgo(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString();
 }
 
+/* ─── Editor constants ────────────────────────────────────────────────────── */
+
+const ADD_SECTION_KEYWORDS = [
+  "add section",
+  "add a section",
+  "insert section",
+  "new section after",
+];
+
+const EDIT_TYPE_LABELS: Record<string, string> = {
+  "full-page": "Page edit",
+  element: "Element edit",
+  "add-section": "Section added",
+  general: "Edit",
+};
+
 /* ─── Component ───────────────────────────────────────────────────────────── */
 
 export function GeneralChatPanel() {
@@ -108,15 +128,66 @@ export function GeneralChatPanel() {
   const isProcessing = useGlobalChatStore((s) => s.isProcessing);
   const historyOpen = useGlobalChatStore((s) => s.historyOpen);
   const conversations = useGlobalChatStore((s) => s.conversations);
+  const editorCallbacks = useGlobalChatStore((s) => s.editorCallbacks);
 
-  const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputValueRef = useRef("");
 
-  // Don't render on editor routes (editor has its own chat)
   const isEditor = isEditorRoute(pathname);
   const projectId = getProjectId(pathname);
   const projectName = useProjectStore((s) => s.project?.name);
+
+  // Editor state (only read when on editor routes)
+  const selectedElement = useEditorStore((s) => s.selectedElement);
+  const selectedBfId = useEditorStore((s) => s.selectedBfId);
+  const setSelectedBfId = useEditorStore((s) => s.setSelectedBfId);
+  const elementTree = useEditorStore((s) => s.elementTree);
+  const isGenerating = useEditorStore((s) => s.isStreamingToIframe);
+  const deleteElement = useEditorStore((s) => s.deleteElement);
+
+  // @ mention system for editor routes
+  const features = useProjectStore((s) => s.features);
+  const userFlows = useProjectStore((s) => s.userFlows);
+  const pages = useProjectStore((s) => s.pages);
+
+  const referenceOptions = useMemo<ReferenceOption[]>(() => {
+    if (!isEditor) return [];
+    const opts: ReferenceOption[] = [];
+    pages.forEach((p) => {
+      opts.push({ type: "page", label: p.title, value: `@page:${p.title}` });
+    });
+    features.forEach((f) => {
+      opts.push({ type: "feature", label: f.title, value: `@feature:${f.title}` });
+    });
+    userFlows.forEach((f) => {
+      opts.push({ type: "flow", label: f.title, value: `@flow:${f.title}` });
+    });
+    return opts;
+  }, [isEditor, pages, features, userFlows]);
+
+  const mention = useMentionSystem(referenceOptions);
+
+  // For non-editor routes, use an uncontrolled input
+  const inputValueRef = useRef("");
+  const plainInputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Editor-specific suggestions
+  const editorSuggestions = useMemo(() => {
+    if (!isEditor) return [];
+    if (selectedElement) {
+      return [
+        { label: "Change color", action: "element-edit" as const },
+        { label: "Change size", action: "element-edit" as const },
+        { label: "Add section after", action: "add-section" as const },
+        { label: "Remove element", action: "remove" as const },
+      ];
+    }
+    return [
+      { label: "Change the color scheme", action: "page-edit" as const },
+      { label: "Add more spacing", action: "page-edit" as const },
+      { label: "Change the font", action: "page-edit" as const },
+      { label: "Add a new section", action: "page-edit" as const },
+    ];
+  }, [isEditor, selectedElement]);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -125,26 +196,40 @@ export function GeneralChatPanel() {
 
   // Auto-focus input when panel opens
   useEffect(() => {
-    if (isOpen && !isEditor && !historyOpen) {
-      setTimeout(() => inputRef.current?.focus(), 100);
+    if (isOpen && !historyOpen) {
+      setTimeout(() => {
+        if (isEditor) {
+          mention.inputRef.current?.focus();
+        } else {
+          plainInputRef.current?.focus();
+        }
+      }, 100);
     }
-  }, [isOpen, isEditor, historyOpen]);
+  }, [isOpen, isEditor, historyOpen, mention.inputRef]);
 
   // Close on Escape
   useEffect(() => {
     function handleEscape(e: KeyboardEvent) {
       if (e.key === "Escape" && isOpen) {
+        if (mention.showMentionMenu) {
+          mention.setShowMentionMenu(false);
+          return;
+        }
         const store = useGlobalChatStore.getState();
         if (store.historyOpen) {
           store.setHistoryOpen(false);
         } else {
           store.setOpen(false);
+          // Also sync editor store
+          if (isEditor) {
+            useEditorStore.getState().setShowChat(false);
+          }
         }
       }
     }
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
-  }, [isOpen]);
+  }, [isOpen, isEditor, mention]);
 
   // ─── Refresh project store after actions ──────────────────────
 
@@ -189,12 +274,68 @@ export function GeneralChatPanel() {
     [projectId],
   );
 
+  // ─── Editor dispatch helper ───────────────────────────────────
+
+  const dispatchEditorEdit = useCallback(
+    (request: string) => {
+      if (!editorCallbacks) return;
+
+      const isAddSection = ADD_SECTION_KEYWORDS.some((kw) =>
+        request.toLowerCase().includes(kw),
+      );
+
+      const editType = selectedElement
+        ? isAddSection
+          ? "add-section"
+          : "element-edit"
+        : "page-edit";
+
+      // Add user message
+      const store = useGlobalChatStore.getState();
+      store.addMessage({
+        id: `msg-${Date.now()}-user`,
+        role: "user",
+        content: request,
+        intent: "design_edit",
+        editType:
+          editType === "add-section"
+            ? "add-section"
+            : editType === "element-edit"
+              ? "element"
+              : "full-page",
+      });
+
+      if (editType === "element-edit" && selectedBfId) {
+        editorCallbacks.onElementEdit(selectedBfId, request);
+      } else if (editType === "add-section") {
+        const afterBfId = selectedBfId || elementTree.at(-1)?.bfId;
+        if (afterBfId) {
+          editorCallbacks.onAddSection(afterBfId, request);
+        } else {
+          editorCallbacks.onEditDesign(request);
+        }
+      } else {
+        editorCallbacks.onEditDesign(request);
+      }
+    },
+    [editorCallbacks, selectedElement, selectedBfId, elementTree],
+  );
+
   // ─── Chat logic ────────────────────────────────────────────────
 
   const handleSubmit = useCallback(
     async (text?: string) => {
-      const message = (text ?? inputValueRef.current).trim();
+      const message = isEditor
+        ? (text ?? mention.editInput).trim()
+        : (text ?? inputValueRef.current).trim();
       if (!message || isProcessing) return;
+
+      // Editor route with registered callbacks → dispatch as design edit
+      if (isEditor && editorCallbacks) {
+        dispatchEditorEdit(message);
+        mention.setEditInput("");
+        return;
+      }
 
       const store = useGlobalChatStore.getState();
 
@@ -206,18 +347,25 @@ export function GeneralChatPanel() {
       };
       store.addMessage(userMsg);
       store.setSuggestions([]);
-      inputValueRef.current = "";
-      if (inputRef.current) inputRef.current.value = "";
+
+      if (isEditor) {
+        mention.setEditInput("");
+      } else {
+        inputValueRef.current = "";
+        if (plainInputRef.current) plainInputRef.current.value = "";
+      }
 
       store.setProcessing(true);
 
       try {
         const history = store.messages.map((m) => ({
           role: m.role,
-          content: m.content,
+          content: m.role === "assistant" && m.actions?.length
+            ? `${m.content}\n\n[Actions taken: ${m.actions.map((a) => `${a.tool}(${JSON.stringify(a.data)})`).join(", ")}]`
+            : m.content,
         }));
 
-        // Use project-action endpoint when on a project route
+        // Use project-action endpoint when on a project route (streaming)
         if (projectId) {
           const res = await fetch("/api/chat/project-action", {
             method: "POST",
@@ -235,29 +383,55 @@ export function GeneralChatPanel() {
             return;
           }
 
-          const data = await res.json();
-          const actions: ProjectAction[] = data.actions ?? [];
-          const successActions = actions.filter((a) => a.success);
-
+          // Create a streaming message that updates as text arrives
+          const streamMsgId = `msg-${Date.now()}-ast`;
           store.addMessage({
-            id: `msg-${Date.now()}-ast`,
+            id: streamMsgId,
             role: "assistant",
-            content: data.message,
+            content: "",
             intent: "project_action",
-            actions: successActions.length > 0 ? successActions : undefined,
           });
 
-          // Refresh project store
-          if (successActions.length > 0) {
-            await refreshProjectData(successActions);
+          let streamedText = "";
+          const streamActions: ProjectAction[] = [];
+
+          await readSSEStream(res, {
+            onEvent: (event) => {
+              if (event.type === "action") {
+                const action = event.action as ProjectAction;
+                if (action.success) streamActions.push(action);
+                store.updateMessage(streamMsgId, {
+                  actions: streamActions.length > 0 ? [...streamActions] : undefined,
+                });
+              } else if (event.type === "text") {
+                streamedText += event.text as string;
+                store.updateMessage(streamMsgId, { content: streamedText });
+              } else if (event.type === "done") {
+                const allActions = (event.actions as ProjectAction[]) ?? [];
+                const successActions = allActions.filter((a) => a.success);
+                store.updateMessage(streamMsgId, {
+                  content: streamedText || "Done!",
+                  actions: successActions.length > 0 ? successActions : undefined,
+                });
+              }
+            },
+            onError: () => {
+              store.updateMessage(streamMsgId, {
+                content: streamedText || "Something went wrong. Please try again.",
+              });
+            },
+          });
+
+          // Refresh project store after all actions
+          if (streamActions.length > 0) {
+            await refreshProjectData(streamActions);
           }
 
           // Navigate user to the relevant step after actions
-          if (successActions.length > 0 && projectId) {
+          if (streamActions.length > 0 && projectId) {
             let target: string | null = null;
 
-            // Explicit navigation action takes priority
-            const navAction = successActions.find(
+            const navAction = streamActions.find(
               (a) => a.tool === "navigate_to_step",
             );
             if (navAction) {
@@ -266,11 +440,10 @@ export function GeneralChatPanel() {
               const pageId = navData?.page_id as string | null;
               target = `/project/${projectId}/${step}`;
               if (step === "designs" && pageId) {
-                target = `/project/${projectId}/designs/${pageId}`;
+                target = `/project/${projectId}/designs/${pageId}?autoGenerate=true`;
               }
             } else {
-              // Auto-navigate based on which tools were used
-              const lastAction = successActions[successActions.length - 1];
+              const lastAction = streamActions[streamActions.length - 1];
               if (lastAction.tool.includes("feature")) {
                 target = `/project/${projectId}/features`;
               } else if (lastAction.tool.includes("flow")) {
@@ -415,7 +588,7 @@ export function GeneralChatPanel() {
         useGlobalChatStore.getState().setProcessing(false);
       }
     },
-    [isProcessing, projectId, refreshProjectData, router],
+    [isProcessing, projectId, isEditor, editorCallbacks, mention, dispatchEditorEdit, refreshProjectData, router],
   );
 
   // ─── Actions ───────────────────────────────────────────────────
@@ -466,7 +639,6 @@ export function GeneralChatPanel() {
 
             const project = await res.json();
             store.setOpen(false);
-            store.clearMessages();
             router.push(`/project/${project.id}`);
           } finally {
             store.setProcessing(false);
@@ -501,8 +673,7 @@ export function GeneralChatPanel() {
 
             const design = await res.json();
             store.setOpen(false);
-            store.clearMessages();
-            router.push(`/design/${design.id}`);
+            router.push(`/design/${design.id}?autoGenerate=true`);
           } finally {
             store.setProcessing(false);
           }
@@ -519,37 +690,97 @@ export function GeneralChatPanel() {
     [handleSubmit, router],
   );
 
+  // ─── Editor suggestion handler ────────────────────────────────
+
+  const handleEditorSuggestionClick = useCallback(
+    (label: string, action: string) => {
+      if (!editorCallbacks) return;
+
+      if (action === "remove") {
+        if (selectedBfId) {
+          deleteElement(selectedBfId);
+          const store = useGlobalChatStore.getState();
+          store.addMessage({
+            id: `msg-${Date.now()}-user`,
+            role: "user",
+            content: label,
+            intent: "design_edit",
+          });
+          store.addMessage({
+            id: `msg-${Date.now()}-ast`,
+            role: "assistant",
+            content: "Element removed from the design",
+            intent: "design_edit",
+          });
+        }
+        return;
+      }
+
+      dispatchEditorEdit(label);
+    },
+    [editorCallbacks, selectedBfId, deleteElement, dispatchEditorEdit],
+  );
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // On editor routes, handle @ mention navigation first
+    if (isEditor) {
+      const handled = mention.handleMentionKeyDown(e);
+      if (handled) return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
     }
   };
 
-  // Don't render on editor pages
-  if (isEditor) return null;
+  const handleClose = () => {
+    useGlobalChatStore.getState().setOpen(false);
+    if (isEditor) {
+      useEditorStore.setState({ showChat: false });
+    }
+  };
+
+  // ─── Dynamic text ─────────────────────────────────────────────
 
   const headerTitle = historyOpen
     ? "Chat History"
-    : projectId
-      ? projectName || "Project AI"
-      : "Calypso AI";
+    : isEditor
+      ? "AI Editor"
+      : projectId
+        ? projectName || "Project AI"
+        : "Calypso AI";
   const headerSubtitle = historyOpen
     ? "Your past conversations"
-    : isProcessing
-      ? "Thinking..."
-      : projectId
-        ? "I can manage your project"
-        : "Ask me anything about your projects";
-  const emptyTitle = projectId
-    ? "How can I help with this project?"
-    : "Hi! I\u2019m Calypso";
-  const emptyDescription = projectId
-    ? "I can add, update, or remove features, user flows, and pages. Just tell me what you need!"
-    : "I can help you create projects and designs. Describe what you\u2019d like to build!";
-  const placeholder = projectId
-    ? "Ask me to change your project..."
-    : "Describe a project or design...";
+    : isProcessing || (isEditor && isGenerating)
+      ? isEditor ? "Editing..." : "Thinking..."
+      : isEditor
+        ? "Describe changes to your design"
+        : projectId
+          ? "I can manage your project"
+          : "Ask me anything about your projects";
+  const emptyTitle = isEditor
+    ? "No edits yet"
+    : projectId
+      ? "How can I help with this project?"
+      : "Hi! I\u2019m Calypso";
+  const emptyDescription = isEditor
+    ? "Select an element and describe what to change, or edit the full page"
+    : projectId
+      ? "I can add, update, or remove features, user flows, and pages. Just tell me what you need!"
+      : "I can help you create projects and designs. Describe what you\u2019d like to build!";
+  const placeholder = isEditor
+    ? selectedElement
+      ? `Edit <${selectedElement.tag}>... (type @ to reference)`
+      : "Describe what to change... (type @ to reference)"
+    : projectId
+      ? "Ask me to change your project..."
+      : "Describe a project or design...";
+
+  const isDisabled = isProcessing || (isEditor && isGenerating);
+
+  // ─── Render ────────────────────────────────────────────────────
+
+  let flatMentionIdx = 0;
 
   return (
     <AnimatePresence>
@@ -574,7 +805,7 @@ export function GeneralChatPanel() {
               </button>
             ) : (
               <ChatAvatar
-                state={isProcessing ? "active" : "idle"}
+                state={isDisabled ? "active" : "idle"}
                 size="sm"
               />
             )}
@@ -609,7 +840,7 @@ export function GeneralChatPanel() {
               </div>
             )}
             <button
-              onClick={() => useGlobalChatStore.getState().setOpen(false)}
+              onClick={handleClose}
               className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <X className="size-4" />
@@ -704,14 +935,67 @@ export function GeneralChatPanel() {
                           ))}
                         </div>
                       )}
+                      {/* Show edit type badge for design edits */}
+                      {msg.editType && (
+                        <div className={`mt-0.5 ${msg.role === "user" ? "text-right" : "text-left"}`}>
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">
+                            {EDIT_TYPE_LABELS[msg.editType] || msg.editType}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   ))
                 )}
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Suggestions */}
-              {suggestions.length > 0 && (
+              {/* Editor-specific: Element context + suggestions */}
+              {isEditor && (
+                <div className="border-t border-border/40 px-3 py-2">
+                  {/* Element context chip */}
+                  {selectedElement && (
+                    <div className="mb-2 flex items-center gap-2">
+                      <button
+                        className="flex items-center gap-1.5 rounded-md bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary transition-colors hover:bg-primary/20"
+                        onClick={() => setSelectedBfId(null)}
+                        title="Click to deselect and edit full page"
+                      >
+                        <span>&lt;{selectedElement.tag}&gt;</span>
+                        {selectedElement.classes && (
+                          <span className="opacity-60">
+                            .{selectedElement.classes.split(" ").slice(0, 2).join(".")}
+                          </span>
+                        )}
+                        <X className="size-2" />
+                      </button>
+                      <span className="text-[10px] text-muted-foreground">
+                        Editing element
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Quick suggestions */}
+                  <div className="flex flex-wrap gap-1">
+                    {editorSuggestions.map((s) => (
+                      <button
+                        key={s.label}
+                        className={`rounded-full px-2.5 py-0.5 text-[10px] font-medium transition-colors ${
+                          s.action === "remove"
+                            ? "bg-destructive/10 text-destructive hover:bg-destructive/20"
+                            : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+                        }`}
+                        onClick={() => handleEditorSuggestionClick(s.label, s.action)}
+                        disabled={isDisabled}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Non-editor: Suggestions */}
+              {!isEditor && suggestions.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 border-t border-border/40 px-4 py-2">
                   {suggestions.map((s) => (
                     <button
@@ -734,24 +1018,92 @@ export function GeneralChatPanel() {
               {/* Input */}
               <div className="border-t border-border/60 px-4 py-3">
                 <div className="flex items-end gap-2">
-                  <textarea
-                    ref={inputRef}
-                    className="flex-1 resize-none rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-sm leading-relaxed placeholder:text-muted-foreground/60 focus:border-primary/40 focus:outline-none focus:ring-1 focus:ring-primary/20"
-                    placeholder={placeholder}
-                    rows={2}
-                    onChange={(e) => {
-                      inputValueRef.current = e.target.value;
-                    }}
-                    onKeyDown={handleKeyDown}
-                    disabled={isProcessing}
-                  />
+                  {isEditor ? (
+                    /* Editor: controlled input with @ mention support */
+                    <div className="relative flex-1">
+                      <textarea
+                        ref={mention.inputRef}
+                        className="w-full resize-none rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-sm leading-relaxed placeholder:text-muted-foreground/60 focus:border-primary/40 focus:outline-none focus:ring-1 focus:ring-primary/20"
+                        placeholder={placeholder}
+                        rows={2}
+                        value={mention.editInput}
+                        onChange={mention.handleInputChange}
+                        onKeyDown={handleKeyDown}
+                        disabled={isDisabled}
+                      />
+
+                      {/* @ Mention dropdown */}
+                      {mention.showMentionMenu && mention.flatOptions.length > 0 && (
+                        <div
+                          ref={mention.menuRef}
+                          className="absolute bottom-full left-0 mb-1 max-h-48 w-full overflow-y-auto rounded-lg border border-border/60 bg-background shadow-lg"
+                        >
+                          {mention.groupedOptions.map((group) => (
+                            <div key={group.type}>
+                              <div className="px-2 py-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                {group.label}
+                              </div>
+                              {group.items.map((option) => {
+                                const idx = flatMentionIdx++;
+                                return (
+                                  <button
+                                    key={option.value}
+                                    type="button"
+                                    className={`flex w-full items-center gap-2 px-2 py-1.5 text-xs transition-colors ${
+                                      idx === mention.mentionIndex
+                                        ? "bg-primary/10 text-primary"
+                                        : "hover:bg-muted"
+                                    }`}
+                                    data-mention-idx={idx}
+                                    onMouseDown={(e) => {
+                                      e.preventDefault();
+                                      mention.insertMention(option);
+                                    }}
+                                    onMouseEnter={() => mention.setMentionIndex(idx)}
+                                  >
+                                    <span className="text-[10px] text-muted-foreground">
+                                      @{option.type}
+                                    </span>
+                                    <span>{option.label}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {mention.showMentionMenu &&
+                        mention.flatOptions.length === 0 &&
+                        mention.editInput.includes("@") && (
+                          <div className="absolute bottom-full left-0 mb-1 rounded-lg border border-border/60 bg-background px-3 py-2 shadow-lg">
+                            <span className="text-xs text-muted-foreground">
+                              No matches
+                            </span>
+                          </div>
+                        )}
+                    </div>
+                  ) : (
+                    /* Non-editor: uncontrolled input */
+                    <textarea
+                      ref={plainInputRef}
+                      className="flex-1 resize-none rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-sm leading-relaxed placeholder:text-muted-foreground/60 focus:border-primary/40 focus:outline-none focus:ring-1 focus:ring-primary/20"
+                      placeholder={placeholder}
+                      rows={2}
+                      onChange={(e) => {
+                        inputValueRef.current = e.target.value;
+                      }}
+                      onKeyDown={handleKeyDown}
+                      disabled={isProcessing}
+                    />
+                  )}
                   <button
                     type="button"
                     onClick={() => handleSubmit()}
                     className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-colors disabled:opacity-50"
-                    disabled={isProcessing}
+                    disabled={isDisabled}
                   >
-                    {isProcessing ? (
+                    {isDisabled ? (
                       <Loader2 className="size-4 animate-spin" />
                     ) : (
                       <Send className="size-4" />

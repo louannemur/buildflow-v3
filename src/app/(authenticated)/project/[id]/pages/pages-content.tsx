@@ -39,6 +39,10 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  ThinkingAnimation,
+  PAGES_THINKING,
+} from "@/components/features/thinking-animation";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -429,22 +433,7 @@ export function PagesContent() {
 
         {/* Generating skeleton */}
         {generating && pages.length === 0 && (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div
-                key={i}
-                className="space-y-3 rounded-xl border border-border/60 p-4"
-              >
-                <Skeleton className="h-5 w-40" />
-                <Skeleton className="h-4 w-full" />
-                <div className="space-y-1.5">
-                  {Array.from({ length: 3 }).map((_, j) => (
-                    <Skeleton key={j} className="h-3.5 w-3/4" />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
+          <ThinkingAnimation messages={PAGES_THINKING} />
         )}
 
         {/* Empty state */}

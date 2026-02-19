@@ -1,16 +1,22 @@
 "use client";
 
-import { GripVertical } from "lucide-react";
+import { ChevronUp, ChevronDown } from "lucide-react";
 import type { EditorElement } from "@/lib/editor/store";
 
 function OverlayBox({
   element,
   type,
-  onDragStart,
+  canMoveUp,
+  canMoveDown,
+  onMoveUp,
+  onMoveDown,
 }: {
   element: EditorElement;
   type: "selection" | "hover";
-  onDragStart?: (e: React.MouseEvent) => void;
+  canMoveUp?: boolean;
+  canMoveDown?: boolean;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 }) {
   const { top, left, width, height } = element.rect;
 
@@ -45,18 +51,40 @@ function OverlayBox({
               </span>
             )}
           </div>
-          {/* Drag handle */}
-          <div
-            style={{ pointerEvents: "auto", cursor: "grab" }}
-            className="absolute -top-5 -right-0.5 flex items-center justify-center rounded bg-blue-500 p-0.5 text-white shadow-sm hover:bg-blue-600"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onDragStart?.(e);
-            }}
-          >
-            <GripVertical size={12} />
-          </div>
+          {/* Move up/down arrows */}
+          {(canMoveUp || canMoveDown) && (
+            <div
+              style={{ pointerEvents: "auto" }}
+              className="absolute -top-5 -right-0.5 flex items-center gap-px"
+            >
+              {canMoveUp && (
+                <button
+                  className="flex items-center justify-center rounded bg-blue-500 p-0.5 text-white shadow-sm hover:bg-blue-600 transition-colors"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onMoveUp?.();
+                  }}
+                  title="Move up"
+                >
+                  <ChevronUp size={12} />
+                </button>
+              )}
+              {canMoveDown && (
+                <button
+                  className="flex items-center justify-center rounded bg-blue-500 p-0.5 text-white shadow-sm hover:bg-blue-600 transition-colors"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onMoveDown?.();
+                  }}
+                  title="Move down"
+                >
+                  <ChevronDown size={12} />
+                </button>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>
@@ -66,15 +94,19 @@ function OverlayBox({
 interface SelectionOverlayProps {
   selectedElement: EditorElement | null;
   hoveredElement: EditorElement | null;
-  onDragStart?: (e: React.MouseEvent) => void;
-  dropIndicator?: { y: number; width: number; left: number } | null;
+  canMoveUp?: boolean;
+  canMoveDown?: boolean;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 }
 
 export function SelectionOverlay({
   selectedElement,
   hoveredElement,
-  onDragStart,
-  dropIndicator,
+  canMoveUp,
+  canMoveDown,
+  onMoveUp,
+  onMoveDown,
 }: SelectionOverlayProps) {
   return (
     <div
@@ -94,49 +126,11 @@ export function SelectionOverlay({
         <OverlayBox
           element={selectedElement}
           type="selection"
-          onDragStart={onDragStart}
+          canMoveUp={canMoveUp}
+          canMoveDown={canMoveDown}
+          onMoveUp={onMoveUp}
+          onMoveDown={onMoveDown}
         />
-      )}
-      {/* Drop indicator line */}
-      {dropIndicator && (
-        <div
-          style={{
-            position: "absolute",
-            top: `${dropIndicator.y - 1}px`,
-            left: `${dropIndicator.left}px`,
-            width: `${dropIndicator.width}px`,
-            height: "2px",
-            background: "rgb(59, 130, 246)",
-            zIndex: 20,
-            borderRadius: "1px",
-            boxShadow: "0 0 4px rgba(59, 130, 246, 0.5)",
-            transition: "top 0.1s ease-out",
-          }}
-        >
-          {/* Circle indicators at ends */}
-          <div
-            style={{
-              position: "absolute",
-              top: "-3px",
-              left: "-4px",
-              width: "8px",
-              height: "8px",
-              borderRadius: "50%",
-              background: "rgb(59, 130, 246)",
-            }}
-          />
-          <div
-            style={{
-              position: "absolute",
-              top: "-3px",
-              right: "-4px",
-              width: "8px",
-              height: "8px",
-              borderRadius: "50%",
-              background: "rgb(59, 130, 246)",
-            }}
-          />
-        </div>
       )}
     </div>
   );

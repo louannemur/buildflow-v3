@@ -398,3 +398,20 @@ export function formatTokensForPrompt(tokens: StyleTokens): string {
 
   return lines.join('\n');
 }
+
+/**
+ * Extract navigation/header HTML from a design.
+ * Returns the raw HTML of the first <header> or <nav> element found.
+ * Prefers <header> since it usually wraps the <nav> with full styling context.
+ */
+export function extractNavigationHtml(html: string): string | null {
+  // Try <header> first (usually wraps nav with brand + links)
+  const headerMatch = html.match(/<header[\s>][\s\S]*?<\/header>/i);
+  if (headerMatch) return headerMatch[0];
+
+  // Fallback to <nav>
+  const navMatch = html.match(/<nav[\s>][\s\S]*?<\/nav>/i);
+  if (navMatch) return navMatch[0];
+
+  return null;
+}

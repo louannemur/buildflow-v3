@@ -1,13 +1,12 @@
 "use client";
 
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useMemo } from "react";
 
 const IFRAME_W = 1280;
 const IFRAME_H = 800;
 
 export function HtmlPreview({ html }: { html: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
   const [scale, setScale] = useState(0.25);
   const [visible, setVisible] = useState(false);
 
@@ -43,52 +42,32 @@ export function HtmlPreview({ html }: { html: string }) {
     return () => ro.disconnect();
   }, [visible]);
 
-  // Write HTML into iframe
-  useEffect(() => {
-    if (!visible) return;
-    const iframe = iframeRef.current;
-    if (!iframe) return;
+  // Build srcdoc content (avoids contentDocument access on sandboxed iframe)
+  const srcdoc = useMemo(() => {
+    const lower = html.trimStart().toLowerCase();
+    const isFullDoc = lower.startsWith("<!doctype") || lower.startsWith("<html");
 
-    const doc = iframe.contentDocument;
-    if (!doc) return;
-
-    const isFullDoc =
-      html.trimStart().startsWith("<!DOCTYPE") ||
-      html.trimStart().startsWith("<html");
-
-    doc.open();
     if (isFullDoc) {
-      const styled = html.replace(
-        "</head>",
-        `<style>body{overflow:hidden;pointer-events:none;}</style></head>`,
-      );
-      doc.write(styled);
-    } else {
-      doc.write(`
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <style>
-              body {
-                margin: 0;
-                overflow: hidden;
-                transform-origin: top left;
-                pointer-events: none;
-              }
-            </style>
-          </head>
-          <body>${html}</body>
-        </html>
-      `);
+      // Inject preview style before </head> (case-insensitive search)
+      const headCloseIdx = html.search(/<\/head>/i);
+      if (headCloseIdx !== -1) {
+        return (
+          html.slice(0, headCloseIdx) +
+          `<style>body{overflow:hidden;pointer-events:none;}</style>` +
+          html.slice(headCloseIdx)
+        );
+      }
+      return html;
     }
-    doc.close();
-  }, [html, visible]);
+
+    // Fragment — wrap in a full document with Tailwind CDN for utility classes
+    return `<!DOCTYPE html><html><head><meta charset="UTF-8"><script src="https://cdn.tailwindcss.com"><\/script><style>body{margin:0;overflow:hidden;transform-origin:top left;pointer-events:none;}</style></head><body>${html}</body></html>`;
+  }, [html]);
 
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden">
       {visible && (
         <iframe
-          ref={iframeRef}
           title="Design preview"
           className="pointer-events-none origin-top-left border-none"
           style={{
@@ -96,6 +75,7 @@ export function HtmlPreview({ html }: { html: string }) {
             height: IFRAME_H,
             transform: `scale(${scale})`,
           }}
+          srcDoc={srcdoc}
           sandbox="allow-scripts"
           tabIndex={-1}
         />

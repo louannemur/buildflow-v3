@@ -29,6 +29,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  ThinkingAnimation,
+  FLOWS_THINKING,
+} from "@/components/features/thinking-animation";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -468,28 +472,7 @@ export function FlowsContent() {
 
         {/* Generating skeleton */}
         {generating && userFlows.length === 0 && (
-          <div className="grid gap-5 sm:grid-cols-2">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div
-                key={i}
-                className="rounded-xl border border-border/60 bg-card shadow-sm"
-              >
-                <div className="flex items-center justify-between px-6 pt-5 pb-1">
-                  <Skeleton className="h-5 w-48" />
-                  <Skeleton className="h-5 w-16 rounded-full" />
-                </div>
-                <div className="space-y-3 px-6 pt-3 pb-5">
-                  {Array.from({ length: 5 }).map((_, j) => (
-                    <div key={j} className="flex items-center gap-3">
-                      <Skeleton className="size-6 shrink-0 rounded-full" />
-                      <Skeleton className="h-4 flex-1" />
-                      <Skeleton className="h-4 w-16 shrink-0" />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
+          <ThinkingAnimation messages={FLOWS_THINKING} />
         )}
 
         {/* Empty state */}

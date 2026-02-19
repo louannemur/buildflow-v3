@@ -39,14 +39,39 @@ import {
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
 
-/** Convert "rgb(r, g, b)" or "rgba(r, g, b, a)" to "#rrggbb" */
-function rgbToHex(rgb: string): string | null {
-  const match = rgb.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-  if (!match) return null;
-  const r = parseInt(match[1]).toString(16).padStart(2, "0");
-  const g = parseInt(match[2]).toString(16).padStart(2, "0");
-  const b = parseInt(match[3]).toString(16).padStart(2, "0");
-  return `#${r}${g}${b}`;
+/** Convert a CSS color string to "#rrggbb". Handles:
+ *  - hex: "#abc", "#aabbcc"
+ *  - rgb(r, g, b) / rgba(r, g, b, a)  (comma-separated)
+ *  - rgb(r g b) / rgb(r g b / a)       (modern space-separated) */
+function rgbToHex(color: string): string | null {
+  if (!color) return null;
+  const c = color.trim();
+
+  // Already hex — normalise to 6-digit
+  if (/^#[0-9a-fA-F]{6,8}$/.test(c)) return c.slice(0, 7);
+  if (/^#[0-9a-fA-F]{3}$/.test(c)) {
+    return `#${c[1]}${c[1]}${c[2]}${c[2]}${c[3]}${c[3]}`;
+  }
+
+  // rgb(r, g, b) / rgba(r, g, b, a) — comma-separated
+  const commaMatch = c.match(/rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)/);
+  if (commaMatch) {
+    const r = parseInt(commaMatch[1]).toString(16).padStart(2, "0");
+    const g = parseInt(commaMatch[2]).toString(16).padStart(2, "0");
+    const b = parseInt(commaMatch[3]).toString(16).padStart(2, "0");
+    return `#${r}${g}${b}`;
+  }
+
+  // rgb(r g b) / rgb(r g b / a) — modern space-separated
+  const spaceMatch = c.match(/rgba?\(\s*(\d+)\s+(\d+)\s+(\d+)/);
+  if (spaceMatch) {
+    const r = parseInt(spaceMatch[1]).toString(16).padStart(2, "0");
+    const g = parseInt(spaceMatch[2]).toString(16).padStart(2, "0");
+    const b = parseInt(spaceMatch[3]).toString(16).padStart(2, "0");
+    return `#${r}${g}${b}`;
+  }
+
+  return null;
 }
 
 /* ─── Props ──────────────────────────────────────────────────────────── */
@@ -414,8 +439,8 @@ export function PropertiesPanel({
         }
       }
 
-      // 2. Set inline style for CSS specificity reliability
-      result = setInlineStyleProperty(result, selectedBfId, cssProp, hex);
+      // 2. Set inline style with !important to override any custom CSS
+      result = setInlineStyleProperty(result, selectedBfId, cssProp, hex + " !important");
       return result;
     });
 
@@ -643,70 +668,6 @@ export function PropertiesPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {/* ── Size & Position ───────────────────────────────────── */}
-        <Section title="Size & Position">
-          {/* Computed dimensions (read-only) */}
-          <div className="grid grid-cols-4 gap-2 mb-2">
-            <div>
-              <label className="mb-0.5 block text-[10px] text-muted-foreground">X</label>
-              <div className="h-7 flex items-center rounded bg-muted/20 px-2 text-xs text-muted-foreground tabular-nums">{Math.round(rect.left)}</div>
-            </div>
-            <div>
-              <label className="mb-0.5 block text-[10px] text-muted-foreground">Y</label>
-              <div className="h-7 flex items-center rounded bg-muted/20 px-2 text-xs text-muted-foreground tabular-nums">{Math.round(rect.top)}</div>
-            </div>
-            <div>
-              <label className="mb-0.5 block text-[10px] text-muted-foreground">W</label>
-              <div className="h-7 flex items-center rounded bg-muted/20 px-2 text-xs text-muted-foreground tabular-nums">{Math.round(rect.width)}</div>
-            </div>
-            <div>
-              <label className="mb-0.5 block text-[10px] text-muted-foreground">H</label>
-              <div className="h-7 flex items-center rounded bg-muted/20 px-2 text-xs text-muted-foreground tabular-nums">{Math.round(rect.height)}</div>
-            </div>
-          </div>
-          {!isSvgElement && (
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              <PropInput
-                label="Width"
-                value={parsed?.width ? parsed.width.replace("w-", "") : ""}
-                placeholder="auto"
-                onChange={(v) =>
-                  handleSwapClass(parsed?.width ?? null, v ? `w-${v}` : null)
-                }
-              />
-              <PropInput
-                label="Height"
-                value={parsed?.height ? parsed.height.replace("h-", "") : ""}
-                placeholder="auto"
-                onChange={(v) =>
-                  handleSwapClass(parsed?.height ?? null, v ? `h-${v}` : null)
-                }
-              />
-              {parsed?.maxWidth && (
-                <PropInput
-                  label="Max Width"
-                  value={parsed.maxWidth.replace("max-w-", "")}
-                  onChange={(v) =>
-                    handleSwapClass(parsed.maxWidth, v ? `max-w-${v}` : null)
-                  }
-                />
-              )}
-              {parsed?.maxHeight && (
-                <PropInput
-                  label="Max Height"
-                  value={parsed.maxHeight.replace("max-h-", "")}
-                  onChange={(v) =>
-                    handleSwapClass(
-                      parsed.maxHeight,
-                      v ? `max-h-${v}` : null,
-                    )
-                  }
-                />
-              )}
-            </div>
-          )}
-        </Section>
-
         {/* ── Padding ───────────────────────────────────────────── */}
         {showPadding && <Section title="Padding">
           <div className="grid grid-cols-4 gap-2">

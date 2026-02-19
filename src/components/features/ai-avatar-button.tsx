@@ -3,33 +3,17 @@
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChatAvatar } from "./chat-avatar";
-import { useEditorStore } from "@/lib/editor/store";
 import { useGlobalChatStore } from "@/stores/global-chat-store";
-
-function isEditorRoute(pathname: string): boolean {
-  return (
-    /^\/design\/[^/]+$/.test(pathname) ||
-    /^\/project\/[^/]+\/designs\/[^/]+$/.test(pathname)
-  );
-}
 
 export function AIAvatarButton() {
   const pathname = usePathname();
-  const isEditor = isEditorRoute(pathname);
+  const isOpen = useGlobalChatStore((s) => s.isOpen);
 
-  const editorChatOpen = useEditorStore((s) => s.showChat);
-  const globalChatOpen = useGlobalChatStore((s) => s.isOpen);
-  const isOpen = isEditor ? editorChatOpen : globalChatOpen;
-
-  // Hide on /home
+  // Hide on /home (home has its own inline chat input)
   if (pathname === "/home") return null;
 
   const handleClick = () => {
-    if (isEditor) {
-      useEditorStore.getState().toggleChat();
-    } else {
-      useGlobalChatStore.getState().toggle();
-    }
+    useGlobalChatStore.getState().toggle();
   };
 
   return (

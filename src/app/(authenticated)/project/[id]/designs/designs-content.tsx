@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { motion } from "framer-motion";
-import { extractHtmlFromStream } from "@/lib/ai/extract-code";
 import {
   Sparkles,
   Star,
@@ -18,6 +17,10 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
+import {
+  ThinkingAnimation,
+  DESIGN_THINKING,
+} from "@/components/features/thinking-animation";
 import {
   useProjectStore,
   type ProjectPage,
@@ -62,6 +65,8 @@ function formatRelativeDate(dateStr: string) {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+/* (DesignGenProgress was inlined below) */
+
 /* ═══════════════════════════════════════════════════════════════════════════ */
 /*  Designs content                                                          */
 /* ═══════════════════════════════════════════════════════════════════════════ */
@@ -75,31 +80,12 @@ export function DesignsContent() {
     designGenerating: generating,
     designGenProgress: genProgress,
     designGenTotal: genTotal,
-    designGenCurrentPageName: genPageName,
     designGenProjectId: genProjectId,
     designStreamingPageId,
-    designStreamingHtml,
     generateAllDesigns,
     resumeDesignGeneration,
   } = useProjectStore();
   const router = useRouter();
-
-  // Throttle streaming HTML updates to avoid excessive iframe re-renders
-  const [throttledHtmlState, setThrottledHtmlState] = useState("");
-  const throttledStreamHtml = designStreamingPageId ? throttledHtmlState : "";
-  const streamTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (!designStreamingPageId) return;
-    if (streamTimerRef.current) return; // Already scheduled
-    streamTimerRef.current = setTimeout(() => {
-      setThrottledHtmlState(useProjectStore.getState().designStreamingHtml);
-      streamTimerRef.current = null;
-    }, 300);
-    return () => {
-      if (streamTimerRef.current) clearTimeout(streamTimerRef.current);
-      streamTimerRef.current = null;
-    };
-  }, [designStreamingPageId, designStreamingHtml]);
 
   // Scroll to item from sidebar hash navigation
   useEffect(() => {
@@ -260,23 +246,24 @@ export function DesignsContent() {
 
       {/* Batch generation progress */}
       {generating && genTotal > 0 && genProjectId === project.id && (
-        <div className="mb-6 rounded-xl border border-border/60 bg-muted/30 p-4">
-          <div className="mb-2 flex items-center justify-between text-sm">
-            <span className="flex items-center gap-2 font-medium">
-              <Loader2 className="size-4 animate-spin" />
-              {genPageName
-                ? `Generating: ${genPageName}...`
-                : "Generating designs..."}
-            </span>
-            <span className="text-muted-foreground">
-              {genProgress} / {genTotal}
-            </span>
+        <>
+          <div className="mb-6 rounded-xl border border-border/60 bg-muted/30 p-4">
+            <div className="mb-2 flex items-center justify-between text-sm">
+              <span className="flex items-center gap-2 font-medium">
+                <Loader2 className="size-4 animate-spin" />
+                Generating designs...
+              </span>
+              <span className="text-muted-foreground">
+                {genProgress} / {genTotal}
+              </span>
+            </div>
+            <Progress
+              value={(genProgress / genTotal) * 100}
+              className="h-2"
+            />
           </div>
-          <Progress
-            value={(genProgress / genTotal) * 100}
-            className="h-2"
-          />
-        </div>
+          <ThinkingAnimation messages={DESIGN_THINKING} />
+        </>
       )}
 
       {/* Empty state — no pages */}
@@ -320,9 +307,6 @@ export function DesignsContent() {
 
             // Check if this page is currently being streamed
             const isStreaming = designStreamingPageId === page.id;
-            const streamPreview = isStreaming
-              ? extractHtmlFromStream(throttledStreamHtml)
-              : null;
 
             return (
               <motion.div key={page.id} id={page.id} variants={staggerItem} className="h-full">
@@ -331,7 +315,6 @@ export function DesignsContent() {
                   design={design ? { ...design, html } : null}
                   isStyleGuide={design?.isStyleGuide ?? false}
                   isStreaming={isStreaming}
-                  streamingHtml={streamPreview?.htmlStarted ? streamPreview.htmlContent : undefined}
                   onClick={() => handleCardClick(page.id)}
                 />
               </motion.div>
@@ -352,14 +335,12 @@ function DesignCard({
   design,
   isStyleGuide,
   isStreaming,
-  streamingHtml,
   onClick,
 }: {
   page: ProjectPage;
   design: ProjectDesign | null;
   isStyleGuide: boolean;
   isStreaming?: boolean;
-  streamingHtml?: string;
   onClick: () => void;
 }) {
   const hasDesign = design && design.html && design.html.length > 0;
@@ -377,8 +358,11 @@ function DesignCard({
     >
       {/* Thumbnail area */}
       <div className="relative aspect-[16/10] w-full overflow-hidden bg-muted/50">
-        {isStreaming && streamingHtml ? (
-          <HtmlPreview html={streamingHtml} />
+        {isStreaming ? (
+          <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground/50">
+            <Loader2 className="size-6 animate-spin" />
+            <span className="text-xs font-medium">Generating...</span>
+          </div>
         ) : hasDesign && design.thumbnail ? (
           <Image
             src={design.thumbnail}
@@ -388,11 +372,6 @@ function DesignCard({
           />
         ) : hasDesign ? (
           <HtmlPreview html={design.html} />
-        ) : isStreaming ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground/50">
-            <Loader2 className="size-6 animate-spin" />
-            <span className="text-xs font-medium">Generating...</span>
-          </div>
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground/50">
             <Wand2 className="size-8" />

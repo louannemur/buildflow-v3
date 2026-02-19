@@ -11,10 +11,17 @@ export interface GlobalChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
-  intent?: "new_project" | "new_design" | "general" | "project_action";
+  intent?: "new_project" | "new_design" | "general" | "project_action" | "design_edit";
   projectName?: string;
   projectDescription?: string;
   actions?: ProjectAction[];
+  editType?: "full-page" | "element" | "add-section" | "general";
+}
+
+export interface EditorCallbacks {
+  onEditDesign: (prompt: string) => void;
+  onElementEdit: (bfId: string, prompt: string) => void;
+  onAddSection: (afterBfId: string, prompt: string) => void;
 }
 
 export interface GlobalSuggestion {
@@ -45,6 +52,7 @@ interface GlobalChatState {
   toggle: () => void;
   setOpen: (open: boolean) => void;
   addMessage: (msg: GlobalChatMessage) => void;
+  updateMessage: (id: string, updates: Partial<GlobalChatMessage>) => void;
   setSuggestions: (suggestions: GlobalSuggestion[]) => void;
   setProcessing: (processing: boolean) => void;
   clearMessages: () => void;
@@ -56,6 +64,11 @@ interface GlobalChatState {
   saveConversation: (projectId?: string | null) => Promise<void>;
   newConversation: (projectId?: string | null) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
+
+  // Editor integration
+  editorCallbacks: EditorCallbacks | null;
+  registerEditorCallbacks: (callbacks: EditorCallbacks) => void;
+  unregisterEditorCallbacks: () => void;
 }
 
 /* ─── Debounced save helper ─────────────────────────────────────────────── */
@@ -88,6 +101,19 @@ export const useGlobalChatStore = create<GlobalChatState>((set, get) => ({
     set((s) => ({ messages: [...s.messages, msg] }));
     // Auto-save after assistant messages
     if (msg.role === "assistant") {
+      debouncedSave();
+    }
+  },
+
+  updateMessage: (id, updates) => {
+    set((s) => ({
+      messages: s.messages.map((m) =>
+        m.id === id ? { ...m, ...updates } : m,
+      ),
+    }));
+    // Re-trigger debounced save so the final content is captured
+    const msg = get().messages.find((m) => m.id === id);
+    if (msg?.role === "assistant") {
       debouncedSave();
     }
   },
@@ -218,6 +244,11 @@ export const useGlobalChatStore = create<GlobalChatState>((set, get) => ({
       historyOpen: false,
     });
   },
+
+  // Editor integration
+  editorCallbacks: null,
+  registerEditorCallbacks: (callbacks) => set({ editorCallbacks: callbacks }),
+  unregisterEditorCallbacks: () => set({ editorCallbacks: null }),
 
   deleteConversation: async (id) => {
     try {

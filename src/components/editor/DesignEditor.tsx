@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useCallback, useState, useRef } from "react";
-import { AnimatePresence } from "framer-motion";
 import { useEditorStore, getCleanSource } from "@/lib/editor/store";
 import { stripBfIds } from "@/lib/design/inject-bf-ids";
 import { findElementInCode, getOpeningTag, moveElement } from "@/lib/design/code-mutator";
@@ -11,14 +10,14 @@ import { PropertiesPanel } from "./PropertiesPanel";
 import { CodePanel } from "./CodePanel";
 import { Toolbar } from "./Toolbar";
 import { StylePickerModal } from "./StylePickerModal";
-import type { GenerateConfig } from "./StylePickerModal";
 import { RegenerationModal } from "./RegenerationModal";
 import type { RegenerateConfig } from "./RegenerationModal";
+import { StyleMismatchModal } from "./StyleMismatchModal";
 import { StreamingIndicator } from "./StreamingOverlay";
+import { useProjectStore } from "@/stores/project-store";
 import { VersionHistory } from "./VersionHistory";
-import { EditorChatPanel } from "./EditorChatPanel";
 import { useAIGenerate } from "@/hooks/useAIGenerate";
-import { useChatHistoryStore } from "@/stores/chat-history-store";
+import { useGlobalChatStore } from "@/stores/global-chat-store";
 import { UpgradeModal } from "@/components/features/upgrade-modal";
 import { extractHtmlFromStream } from "@/lib/ai/extract-code";
 import { readSSEStream } from "@/lib/sse-client";
@@ -71,7 +70,6 @@ export function DesignEditor({
   const setSelectedBfId = useEditorStore((s) => s.setSelectedBfId);
   const showLayers = useEditorStore((s) => s.showLayers);
   const showProperties = useEditorStore((s) => s.showProperties);
-  const showChat = useEditorStore((s) => s.showChat);
   const showHistory = useEditorStore((s) => s.showHistory);
   const deleteElement = useEditorStore((s) => s.deleteElement);
   const undo = useEditorStore((s) => s.undo);
@@ -86,6 +84,11 @@ export function DesignEditor({
   const [regenModalOpen, setRegenModalOpen] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
 
+  // Style mismatch detection (post-regeneration)
+  const [styleMismatchOpen, setStyleMismatchOpen] = useState(false);
+  const [previousHtmlForRevert, setPreviousHtmlForRevert] = useState<string | null>(null);
+  const [isUpdatingOtherPages, setIsUpdatingOtherPages] = useState(false);
+
 
   // Refs for live iframe streaming
   const streamHtmlStartedRef = useRef(false);
@@ -93,7 +96,6 @@ export function DesignEditor({
 
   // AI generation
   const {
-    isGenerating,
     generateDesignStreamAction,
     editDesignStream,
     modifyElementStream,
@@ -105,7 +107,25 @@ export function DesignEditor({
     setOnStreamChunk,
   } = useAIGenerate();
 
-  const { addMessage, getHistory } = useChatHistoryStore();
+  const globalChatAddMessage = useGlobalChatStore((s) => s.addMessage);
+
+  const addMessage = useCallback(
+    (msg: { role: "user" | "assistant"; content: string; editType?: "full-page" | "element" | "add-section" | "general" }) => {
+      globalChatAddMessage({
+        id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        ...msg,
+        intent: "design_edit",
+      });
+    },
+    [globalChatAddMessage],
+  );
+
+  const getChatHistory = useCallback(() => {
+    return useGlobalChatStore.getState().messages.map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: m.content,
+    }));
+  }, []);
 
   // ─── Initialize store on mount ────────────────────────────────────
 
@@ -130,12 +150,26 @@ export function DesignEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [designId]);
 
-  // Auto-open style picker when design has no code
+  // Auto-generate (from chat navigation) or auto-open style picker when design has no code
+  const initialActionRef = useRef(false);
   useEffect(() => {
-    if (!initialCode.trim()) {
+    if (initialActionRef.current || initialCode.trim()) return;
+    initialActionRef.current = true;
+
+    // Effects only run client-side, so window is always available here
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("autoGenerate") === "true") {
+      // Clean up URL param
+      const url = new URL(window.location.href);
+      url.searchParams.delete("autoGenerate");
+      window.history.replaceState({}, "", url.toString());
+      // Start generation immediately
+      handleGenerateDesign("surprise");
+    } else {
       setStylePickerOpen(true);
     }
-  }, [initialCode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only run once on mount
+  }, []);
 
   // ─── Live iframe streaming ──────────────────────────────────────────
 
@@ -197,7 +231,7 @@ export function DesignEditor({
   // ─── AI Handlers ──────────────────────────────────────────────────
 
   const buildGeneratePrompt = useCallback(
-    (config: GenerateConfig | "surprise"): string => {
+    (config: "surprise" | string): string => {
       const parts: string[] = [
         "Generate a complete, beautiful, Awwwards-quality design.",
       ];
@@ -207,49 +241,8 @@ export function DesignEditor({
           "Pick a creative, visually striking style. Surprise the user with something unique and polished.",
         );
       } else {
-        // Style
-        const styleLabels: Record<string, string> = {
-          modern: "Modern / Minimal",
-          bold: "Bold / Striking",
-          soft: "Soft / Organic",
-          corporate: "Corporate / Professional",
-          playful: "Playful / Creative",
-        };
-        parts.push(`Style: ${styleLabels[config.style] ?? config.style}.`);
-
-        // Colors
-        if (config.colorScheme === "custom") {
-          parts.push(
-            `Use these exact colors — primary: ${config.customColors.primary}, secondary: ${config.customColors.secondary}, accent: ${config.customColors.accent}.`,
-          );
-        } else {
-          const schemeLabels: Record<string, string> = {
-            vibrant: "Vibrant, saturated colors",
-            muted: "Muted, soft tones",
-            dark: "Dark mode with deep backgrounds",
-            pastel: "Light pastel palette",
-            monochrome: "Monochrome grayscale palette",
-          };
-          parts.push(`Color scheme: ${schemeLabels[config.colorScheme] ?? config.colorScheme}.`);
-        }
-
-        // Animations
-        if (config.animations) {
-          const animLabels: Record<string, string> = {
-            fade: "subtle fade-in animations on scroll",
-            slide: "slide-up entrance animations on scroll",
-            scale: "scale-in animations on scroll",
-            parallax: "parallax scrolling effects",
-          };
-          parts.push(`Include ${animLabels[config.animationType] ?? "animations"}.`);
-        } else {
-          parts.push("No animations — keep everything static.");
-        }
-
-        // Additional instructions
-        if (config.instructions.trim()) {
-          parts.push(`Additional requirements: ${config.instructions.trim()}`);
-        }
+        // User provided a free-form prompt
+        parts.push(config);
       }
 
       // Project context
@@ -266,7 +259,7 @@ export function DesignEditor({
   );
 
   const handleGenerateDesign = useCallback(
-    async (config: GenerateConfig | "surprise") => {
+    async (config: "surprise" | string) => {
       setStylePickerOpen(false);
       setSelectedBfId(null);
 
@@ -274,24 +267,24 @@ export function DesignEditor({
       const label =
         config === "surprise"
           ? "Surprise me"
-          : `Generate ${config.style} design (${config.colorScheme} colors)`;
+          : `Generate design: ${config.slice(0, 60)}${config.length > 60 ? "..." : ""}`;
 
       // Use full design generation (Gemini) for initial generation,
       // and edit (Claude) when modifying an existing design
       const hasExistingDesign = source && source.trim().length > 0;
       const result = hasExistingDesign
-        ? await editDesignStream(prompt, source, getHistory(designId))
+        ? await editDesignStream(prompt, source, getChatHistory())
         : await generateDesignStreamAction(prompt);
 
       if (result) {
         updateSource(result);
         setStreamingToIframe(false);
-        addMessage(designId, {
+        addMessage({
           role: "user",
           content: label,
           editType: "full-page",
         });
-        addMessage(designId, {
+        addMessage({
           role: "assistant",
           content: "Design generated! You can now refine it with further edits.",
           editType: "full-page",
@@ -307,7 +300,7 @@ export function DesignEditor({
         setStreamingToIframe(false);
       }
     },
-    [source, designId, buildGeneratePrompt, editDesignStream, generateDesignStreamAction, updateSource, addMessage, getHistory, setStreamingToIframe, setSelectedBfId],
+    [source, designId, buildGeneratePrompt, editDesignStream, generateDesignStreamAction, updateSource, addMessage, getChatHistory, setStreamingToIframe, setSelectedBfId],
   );
 
   const handleEditDesign = useCallback(
@@ -316,13 +309,13 @@ export function DesignEditor({
       const result = await editDesignStream(
         prompt,
         source,
-        getHistory(designId),
+        getChatHistory(),
       );
 
       if (result) {
         updateSource(result);
         setStreamingToIframe(false);
-        addMessage(designId, {
+        addMessage({
           role: "assistant",
           content: `Done! I've updated the design based on your request: "${prompt}"`,
           editType: "full-page",
@@ -335,13 +328,13 @@ export function DesignEditor({
         });
       } else {
         setStreamingToIframe(false);
-        addMessage(designId, {
+        addMessage({
           role: "assistant",
           content: "Something went wrong. Please try again.",
         });
       }
     },
-    [source, designId, editDesignStream, updateSource, addMessage, getHistory, setStreamingToIframe, setSelectedBfId],
+    [source, designId, editDesignStream, updateSource, addMessage, getChatHistory, setStreamingToIframe, setSelectedBfId],
   );
 
   const handleElementEdit = useCallback(
@@ -362,7 +355,7 @@ export function DesignEditor({
         // (the AI returns only the modified element, not the full document)
         useEditorStore.getState().updateElement(bfId, result);
         setStreamingToIframe(false);
-        addMessage(designId, {
+        addMessage({
           role: "assistant",
           content: `Updated the <${element?.tag ?? "element"}> — applied: "${prompt}"`,
           editType: "element",
@@ -375,7 +368,7 @@ export function DesignEditor({
         });
       } else {
         setStreamingToIframe(false);
-        addMessage(designId, {
+        addMessage({
           role: "assistant",
           content: "Something went wrong. Please try again.",
         });
@@ -393,7 +386,7 @@ export function DesignEditor({
         // (the AI returns only the new section, not the full document)
         useEditorStore.getState().insertAfter(afterBfId, result);
         setStreamingToIframe(false);
-        addMessage(designId, {
+        addMessage({
           role: "assistant",
           content: `New section added to the design: "${prompt}"`,
           editType: "add-section",
@@ -406,7 +399,7 @@ export function DesignEditor({
         });
       } else {
         setStreamingToIframe(false);
-        addMessage(designId, {
+        addMessage({
           role: "assistant",
           content: "Something went wrong adding the section. Please try again.",
         });
@@ -414,6 +407,18 @@ export function DesignEditor({
     },
     [source, designId, addSectionAfterStream, addMessage, setStreamingToIframe],
   );
+
+  // Register editor callbacks so the global chat can dispatch design edits
+  useEffect(() => {
+    useGlobalChatStore.getState().registerEditorCallbacks({
+      onEditDesign: handleEditDesign,
+      onElementEdit: handleElementEdit,
+      onAddSection: handleAddSection,
+    });
+    return () => {
+      useGlobalChatStore.getState().unregisterEditorCallbacks();
+    };
+  }, [handleEditDesign, handleElementEdit, handleAddSection]);
 
   const handleRemoveElement = useCallback(
     (bfId: string) => {
@@ -483,8 +488,10 @@ export function DesignEditor({
                   new RegExp(`(?:^|;)\\s*${css.replace(/-/g, "\\-")}\\s*:\\s*([^;]+)`)
                 );
                 if (pMatch) {
+                  // Strip !important — bridge applies it automatically via setProperty
+                  const colorVal = pMatch[1].trim().replace(/\s*!important\s*$/i, "").trim();
                   iframe.contentWindow.postMessage(
-                    { type: "UPDATE_STYLE", bfId, prop: js, value: pMatch[1].trim() },
+                    { type: "UPDATE_STYLE", bfId, prop: js, value: colorVal },
                     "*",
                   );
                 }
@@ -540,6 +547,9 @@ export function DesignEditor({
       setStreamingToIframe(true);
       streamHtmlStartedRef.current = false;
       streamPrevHtmlLenRef.current = 0;
+
+      // Capture current source for revert
+      const sourceBeforeRegen = source;
 
       let accumulated = "";
       let receivedDone = false;
@@ -624,14 +634,22 @@ export function DesignEditor({
               }
             } else if (event.type === "done" && event.design) {
               receivedDone = true;
-              const design = event.design as { html: string };
+              const design = event.design as { html: string; previousHtml?: string };
               if (design.html) {
                 updateSource(design.html);
-                addMessage(designId, {
+                addMessage({
                   role: "assistant",
                   content: "Design regenerated!",
                   editType: "full-page",
                 });
+
+                // If regenerated without following the style guide, prompt user
+                if (!config.useStyleGuide && !isStyleGuide) {
+                  setPreviousHtmlForRevert(
+                    design.previousHtml || sourceBeforeRegen || null,
+                  );
+                  setStyleMismatchOpen(true);
+                }
               }
               resetStreamState();
             }
@@ -659,8 +677,60 @@ export function DesignEditor({
         resetStreamState();
       }
     },
-    [projectId, pageId, designId, updateSource, addMessage, setStreamingToIframe, setSelectedBfId, setShowUpgradeModal],
+    [projectId, pageId, designId, source, isStyleGuide, updateSource, addMessage, setStreamingToIframe, setSelectedBfId, setShowUpgradeModal],
   );
+
+  // ─── Style mismatch handlers ──────────────────────────────────────
+
+  const handleMakeStyleGuide = useCallback(async () => {
+    setIsUpdatingOtherPages(true);
+    try {
+      await fetch(`/api/designs/${designId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isStyleGuide: true }),
+      });
+
+      if (pageId) {
+        useProjectStore.getState().regenerateAllDesigns(pageId);
+      }
+
+      toast.success("Style guide updated. Regenerating other pages...");
+    } catch {
+      toast.error("Failed to update style guide");
+    } finally {
+      setIsUpdatingOtherPages(false);
+      setStyleMismatchOpen(false);
+      setPreviousHtmlForRevert(null);
+    }
+  }, [designId, pageId]);
+
+  const handleRegenerateAgain = useCallback(() => {
+    setStyleMismatchOpen(false);
+    setPreviousHtmlForRevert(null);
+    setRegenModalOpen(true);
+  }, []);
+
+  const handleRevertToStyleGuide = useCallback(async () => {
+    if (!previousHtmlForRevert) return;
+
+    updateSource(previousHtmlForRevert);
+
+    await fetch(`/api/designs/${designId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ html: previousHtmlForRevert }),
+    });
+
+    addMessage({
+      role: "assistant",
+      content: "Reverted to the previous version.",
+      editType: "full-page",
+    });
+
+    setStyleMismatchOpen(false);
+    setPreviousHtmlForRevert(null);
+  }, [previousHtmlForRevert, designId, updateSource, addMessage]);
 
   // ─── Keyboard shortcuts ───────────────────────────────────────────
 
@@ -724,20 +794,6 @@ export function DesignEditor({
 
       {/* Main editor area */}
       <div className="relative flex min-h-0 flex-1">
-        {/* Left: AI Chat overlay */}
-        <AnimatePresence>
-          {showChat && mode !== "preview" && (
-            <EditorChatPanel
-              designId={designId}
-              onEditDesign={handleEditDesign}
-              onElementEdit={handleElementEdit}
-              onAddSection={handleAddSection}
-              isGenerating={isGenerating}
-              projectContext={projectContext}
-            />
-          )}
-        </AnimatePresence>
-
         {/* Left: Layers panel (design mode, toggled) */}
         {mode === "design" && showLayers && (
           <div className="w-56 shrink-0 border-r border-border/60 bg-background">
@@ -749,7 +805,7 @@ export function DesignEditor({
         <div className="relative min-w-0 flex-1">
           {mode === "code" && <CodePanel />}
           <div className={mode === "code" ? "hidden" : "h-full"}>
-            <Canvas iframeRef={iframeRef} onMoveElement={handleMoveElement} />
+            <Canvas iframeRef={iframeRef} onMoveElement={handleMoveElement} streamPhase={isRegenerating ? "streaming" : streamPhase} />
           </div>
         </div>
 
@@ -791,6 +847,18 @@ export function DesignEditor({
           onOpenChange={setRegenModalOpen}
           isStyleGuide={isStyleGuide}
           onRegenerate={handleRegenerate}
+        />
+      )}
+
+      {/* Style mismatch modal (shown after non-style-guide regeneration) */}
+      {projectId && pageId && (
+        <StyleMismatchModal
+          open={styleMismatchOpen}
+          onOpenChange={setStyleMismatchOpen}
+          onMakeStyleGuide={handleMakeStyleGuide}
+          onRegenerateAgain={handleRegenerateAgain}
+          onRevert={handleRevertToStyleGuide}
+          isUpdatingOtherPages={isUpdatingOtherPages}
         />
       )}
 

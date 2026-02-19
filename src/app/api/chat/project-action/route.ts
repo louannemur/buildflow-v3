@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { anthropic } from "@/lib/ai";
 import { db } from "@/lib/db";
 import { features, userFlows, pages, projects } from "@/lib/db/schema";
+import { createSSEResponse } from "@/lib/sse";
 import type Anthropic from "@anthropic-ai/sdk";
 
 /* ─── Validation ──────────────────────────────────────────────────────────── */
@@ -28,7 +29,7 @@ const tools: Anthropic.Tool[] = [
   {
     name: "add_feature",
     description:
-      "Add a new feature to the project. Use when the user wants to add a feature.",
+      "Add a brand new feature to the project. ONLY use this when the user wants a genuinely NEW feature that does not already exist in the project. If a similar feature already exists, use update_feature instead.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -48,7 +49,7 @@ const tools: Anthropic.Tool[] = [
   {
     name: "update_feature",
     description:
-      "Update an existing feature's title or description. Use when the user wants to modify a feature.",
+      "Update an existing feature's title or description. Use when the user wants to modify, improve, change, or add details to a feature that already exists. Also use this when the user refers to a recently created feature with changes (e.g., 'make it include X', 'add Y to it', 'change that to Z').",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -83,7 +84,7 @@ const tools: Anthropic.Tool[] = [
   {
     name: "add_flow",
     description:
-      "Add a new user flow to the project. Use when the user wants to add a user flow / user journey.",
+      "Add a brand new user flow to the project. ONLY use this when the user wants a genuinely NEW flow that does not already exist. If a similar flow already exists, use update_flow instead.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -118,7 +119,7 @@ const tools: Anthropic.Tool[] = [
   {
     name: "update_flow",
     description:
-      "Update an existing user flow's title or steps. Use when the user wants to modify a flow.",
+      "Update an existing user flow's title or steps. Use when the user wants to modify, improve, or change a flow that already exists, including when they reference a recently created flow with changes.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -165,7 +166,7 @@ const tools: Anthropic.Tool[] = [
   {
     name: "add_page",
     description:
-      "Add a new page to the project. Use when the user wants to add a page.",
+      "Add a brand new page to the project. ONLY use this when the user wants a genuinely NEW page that does not already exist. If a similar page already exists, use update_page instead.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -184,7 +185,7 @@ const tools: Anthropic.Tool[] = [
   {
     name: "update_page",
     description:
-      "Update an existing page's title or description. Use when the user wants to modify a page.",
+      "Update an existing page's title or description. Use when the user wants to modify, improve, or change a page that already exists, including when they reference a recently created page with changes.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -280,14 +281,34 @@ This tool follows a step-by-step workflow: Features → User Flows → Pages →
 - Designs: AI generates visual HTML designs for each page — this is where pages get designed
 - Build: AI generates a complete, deployable codebase from the designs
 
+CRITICAL — UPDATE vs CREATE LOGIC:
+Before EVER creating a new item, you MUST check the CURRENT PROJECT STATE above and the conversation history.
+- If an item with a similar name or purpose ALREADY EXISTS, UPDATE it instead of creating a duplicate.
+- If the user just created something in a recent message and now asks to change/modify/improve it, that is an UPDATE — find the existing item by matching the name or context, and use the update tool with its ID.
+- Examples of implicit edit requests (these are NOT requests to create new items):
+  * "Make it include social login" → update the most recently discussed feature
+  * "Add a description to that" → update the item they just mentioned
+  * "Change the name to X" → update the item being discussed
+  * "Actually, it should also do Y" → update the item from the previous message
+  * "Can you improve that feature?" → update the feature just created/discussed
+- Pronouns like "it", "that", "the feature", "the page", "this one" ALWAYS refer to the most recently discussed or created item of that type. Look at conversation history to resolve what they mean.
+- NEVER create a duplicate. If you're unsure whether to create or update, ask the user.
+
+CONVERSATIONAL INTELLIGENCE:
+You must interpret what the user MEANS, not just what they literally say. Use the full conversation context.
+- If the user created a feature and then says "create the page" or "now the page", infer they likely want a page that implements or relates to the feature they just discussed. Ask: "Would you like me to create a page for [feature name]?" or go ahead and create it if the connection is obvious.
+- If the user says "add login to it", figure out from context what "it" refers to — it's the most recently discussed feature, flow, or page.
+- If the user asks something vague like "what about the dashboard?", check if a Dashboard page/feature exists and ask what they want to do with it — don't just create a new one.
+- If the user's message could mean multiple things, pick the most likely interpretation based on conversation context and confirm: "I'll update [item] to include [change] — does that sound right?" Then proceed with the tool call.
+- If a request truly doesn't make sense even with context, ask ONE specific clarifying question rather than doing nothing.
+
 INSTRUCTIONS:
 - Help the user manage their project by adding, updating, or deleting features, user flows, and pages.
 - Use the provided tools to make changes. You can call multiple tools in one response.
-- When the user asks to add something, use the appropriate add tool.
-- When the user asks to change/edit/update something, find the matching item by name and use the update tool with its ID.
+- When the user asks to add something genuinely NEW (not a modification of something existing), use the appropriate add tool.
+- When the user asks to change/edit/update/improve something, or when they reference a recently created item with modifications, find the matching item by name (or by context from conversation history) and use the update tool with its ID.
 - When the user asks to remove/delete something, find the matching item by name and use the delete tool with its ID.
-- If the user's request is ambiguous, ask for clarification instead of guessing.
-- After making changes, ALWAYS briefly summarize what you did (e.g. "Added the 'User Authentication' feature with email/password login."). The user will be taken to their changes automatically.
+- After making changes, ALWAYS briefly summarize what you did (e.g. "Updated the 'User Authentication' feature to include social login."). The user will be taken to their changes automatically.
 - If the user asks something unrelated to project management (like general questions), respond helpfully without using any tools.
 - Keep responses concise — 1-3 sentences.
 - When adding flows, create meaningful steps with appropriate types (action, decision, navigation, input, display).
@@ -598,79 +619,78 @@ export async function POST(req: Request) {
       { role: "user", content: message },
     ];
 
-    // Call Claude with tools
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1024,
-      system: systemPrompt,
-      tools,
-      messages,
-    });
-
-    // Process response — execute any tool calls
-    const actions: ActionResult[] = [];
-    const toolUseIds: string[] = [];
-    let aiMessage = "";
-
-    for (const block of response.content) {
-      if (block.type === "text") {
-        aiMessage += block.text;
-      } else if (block.type === "tool_use") {
-        toolUseIds.push(block.id);
-        const result = await executeTool(
-          block.name,
-          block.input as Record<string, unknown>,
-          projectId,
-        );
-        actions.push(result);
-      }
-    }
-
-    // If Claude used tools but didn't produce text yet, do a follow-up call
-    // to get the confirmation message
-    if (!aiMessage && actions.length > 0) {
-      const toolResults: Anthropic.MessageParam = {
-        role: "user",
-        content: actions.map((a, i) => ({
-          type: "tool_result" as const,
-          tool_use_id: toolUseIds[i] ?? "",
-          content: a.success
-            ? JSON.stringify(a.data)
-            : `Error: ${a.error}`,
-        })),
-      };
-
-      const followUp = await anthropic.messages.create({
+    // Stream the response via SSE
+    return createSSEResponse(async (enqueue) => {
+      // Phase 1: Stream the initial Claude call — text deltas emit immediately
+      const initialStream = anthropic.messages.stream({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 300,
+        max_tokens: 1024,
         system: systemPrompt,
         tools,
-        messages: [...messages, { role: "assistant", content: response.content }, toolResults],
+        messages,
       });
 
-      for (const block of followUp.content) {
-        if (block.type === "text") {
-          aiMessage += block.text;
+      for await (const event of initialStream) {
+        if (
+          event.type === "content_block_delta" &&
+          event.delta.type === "text_delta"
+        ) {
+          enqueue({ type: "text", text: event.delta.text });
         }
       }
-    }
 
-    // If still no message, generate a default
-    if (!aiMessage) {
-      const successCount = actions.filter((a) => a.success).length;
-      aiMessage =
-        successCount > 0
-          ? `Done! Made ${successCount} change${successCount !== 1 ? "s" : ""} to your project.`
-          : "I wasn't able to make any changes. Could you clarify what you'd like to do?";
-    }
+      const response = await initialStream.finalMessage();
 
-    return NextResponse.json(
-      {
-        message: aiMessage,
-        actions,
-      },
-      { status: 200 },
-    );
+      // Execute any tool calls and emit action events
+      const actions: ActionResult[] = [];
+      const toolUseIds: string[] = [];
+
+      for (const block of response.content) {
+        if (block.type === "tool_use") {
+          toolUseIds.push(block.id);
+          const result = await executeTool(
+            block.name,
+            block.input as Record<string, unknown>,
+            projectId,
+          );
+          actions.push(result);
+          enqueue({ type: "action", action: result });
+        }
+      }
+
+      // Phase 2: Stream the follow-up summary if tools were used
+      if (actions.length > 0) {
+        const toolResults: Anthropic.MessageParam = {
+          role: "user",
+          content: actions.map((a, i) => ({
+            type: "tool_result" as const,
+            tool_use_id: toolUseIds[i] ?? "",
+            content: a.success
+              ? JSON.stringify(a.data)
+              : `Error: ${a.error}`,
+          })),
+        };
+
+        const followUpStream = anthropic.messages.stream({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 300,
+          system: systemPrompt,
+          tools,
+          messages: [...messages, { role: "assistant", content: response.content }, toolResults],
+        });
+
+        for await (const event of followUpStream) {
+          if (
+            event.type === "content_block_delta" &&
+            event.delta.type === "text_delta"
+          ) {
+            enqueue({ type: "text", text: event.delta.text });
+          }
+        }
+      }
+
+      enqueue({ type: "done", actions });
+    });
   } catch {
     return NextResponse.json(
       { error: "Something went wrong. Please try again." },

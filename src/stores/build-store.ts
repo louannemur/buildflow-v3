@@ -285,7 +285,8 @@ async function consumeStream(
               break;
 
             case "done": {
-              const files = event.files ?? allFiles;
+              // Use allFiles (collected from file_complete events) —
+              // the done event no longer includes the full file list.
               // Update project store build config
               useProjectStore.getState().setBuildConfig({
                 id: event.buildId,
@@ -296,7 +297,7 @@ async function consumeStream(
                 updatedAt: new Date().toISOString(),
               });
               set({
-                buildResult: { files, id: event.buildId },
+                buildResult: { files: allFiles, id: event.buildId },
                 streamingFiles: [],
                 currentStreamingPath: null,
                 currentStreamingContent: "",
@@ -305,7 +306,7 @@ async function consumeStream(
               });
               abortController = null;
               toast.success(
-                `Project generated! ${files.length} files created.`,
+                `Project generated! ${allFiles.length} files created.`,
               );
               break;
             }
@@ -322,24 +323,31 @@ async function consumeStream(
       }
     }
 
-    // Stream ended without a done event — recover by fetching the build ID
-    if (allFiles.length > 0 && getState().building) {
-      let buildId = "";
-      try {
-        const res = await fetch(`/api/projects/${projectId}/build`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.output?.id && data.output.files?.length > 0) {
-            buildId = data.output.id;
+    // Stream ended — ensure building is always reset
+    if (getState().building) {
+      if (allFiles.length > 0) {
+        // Had files but no done event — recover by fetching build ID
+        let buildId = "";
+        try {
+          const res = await fetch(`/api/projects/${projectId}/build`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.output?.id && data.output.files?.length > 0) {
+              buildId = data.output.id;
+            }
           }
+        } catch {
+          // Fall through with empty ID
         }
-      } catch {
-        // Fall through with empty ID
+        set({
+          buildResult: { files: allFiles, id: buildId },
+          building: false,
+        });
+      } else {
+        // Stream ended with no files and no done/error event
+        toast.error("Build failed — no files were generated. Please try again.");
+        set({ building: false });
       }
-      set({
-        buildResult: { files: allFiles, id: buildId },
-        building: false,
-      });
       abortController = null;
     }
   } catch (err) {

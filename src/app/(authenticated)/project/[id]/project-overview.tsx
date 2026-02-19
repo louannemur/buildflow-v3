@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Image from "next/image";
 import { motion } from "framer-motion";
 import {
   Lightbulb,
@@ -14,13 +13,12 @@ import {
   Circle,
   X,
   Pencil,
-  Type,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProjectStore, type ProjectStep } from "@/stores/project-store";
 import { useProjectContext } from "@/components/layout/ProjectLayout";
@@ -180,10 +178,6 @@ export function ProjectOverview() {
   function handleStepClick(step: ProjectStep) {
     setActiveStep(step);
   }
-
-  // ─── Style guide ────────────────────────────────────────────────────
-
-  const styleGuide = designs.find((d) => d.isStyleGuide);
 
   // ─── Render ─────────────────────────────────────────────────────────
 
@@ -404,51 +398,6 @@ export function ProjectOverview() {
           );
         })}
 
-        {/* Style guide card */}
-        {styleGuide && (
-          <motion.div variants={staggerItem}>
-            <Card className="overflow-hidden">
-              {styleGuide.thumbnail && (
-                <div className="relative aspect-[16/10] w-full overflow-hidden bg-muted">
-                  <Image
-                    src={styleGuide.thumbnail}
-                    alt="Style Guide"
-                    fill
-                    className="object-cover"
-                  />
-                </div>
-              )}
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <Palette className="size-4 text-primary" />
-                  Style Guide
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="pb-3">
-                {styleGuide.fonts && (
-                  <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-                    <Type className="size-3" />
-                    <span>
-                      {styleGuide.fonts.heading} / {styleGuide.fonts.body}
-                    </span>
-                  </div>
-                )}
-                {styleGuide.colors && (
-                  <div className="flex gap-1">
-                    {Object.values(styleGuide.colors).map((color, i) => (
-                      <div
-                        key={i}
-                        className="size-5 rounded-full border border-border/50"
-                        style={{ backgroundColor: color }}
-                        title={color}
-                      />
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
       </motion.div>
     </motion.div>
   );
