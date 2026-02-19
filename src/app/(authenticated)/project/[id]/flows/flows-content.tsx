@@ -255,6 +255,20 @@ export function FlowsContent() {
     setModalOpen(true);
   }
 
+  function closeFlowModal() {
+    const hasContent = modalTitle.trim() || modalSteps.some((s) => s.title.trim());
+    if (editingFlow) {
+      const titleChanged = modalTitle !== editingFlow.title;
+      const stepsChanged = JSON.stringify(modalSteps) !== JSON.stringify(editingFlow.steps);
+      if (titleChanged || stepsChanged) {
+        if (!window.confirm("You have unsaved changes. Discard them?")) return;
+      }
+    } else if (hasContent) {
+      if (!window.confirm("You have unsaved changes. Discard them?")) return;
+    }
+    setModalOpen(false);
+  }
+
   function addModalStep() {
     setModalSteps((prev) => [
       ...prev,
@@ -585,7 +599,7 @@ export function FlowsContent() {
       </div>
 
       {/* Add/Edit Flow Modal */}
-      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+      <Dialog open={modalOpen} onOpenChange={(open) => { if (!open) closeFlowModal(); }}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>
@@ -691,7 +705,7 @@ export function FlowsContent() {
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => setModalOpen(false)}
+              onClick={closeFlowModal}
               disabled={isSaving}
             >
               Cancel

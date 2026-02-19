@@ -11,7 +11,7 @@ export interface GlobalChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
-  intent?: "new_project" | "new_design" | "general" | "project_action" | "design_edit";
+  intent?: "new_project" | "new_design" | "manage_project" | "general" | "project_action" | "design_edit";
   projectName?: string;
   projectDescription?: string;
   actions?: ProjectAction[];
@@ -26,7 +26,7 @@ export interface EditorCallbacks {
 
 export interface GlobalSuggestion {
   label: string;
-  action: "create_project" | "create_design" | "send_message";
+  action: "create_project" | "create_design" | "go_to_project" | "send_message";
   text?: string;
 }
 
@@ -67,8 +67,10 @@ interface GlobalChatState {
 
   // Editor integration
   editorCallbacks: EditorCallbacks | null;
+  pendingEditorPrompt: string | null;
   registerEditorCallbacks: (callbacks: EditorCallbacks) => void;
   unregisterEditorCallbacks: () => void;
+  setPendingEditorPrompt: (prompt: string | null) => void;
 }
 
 /* ─── Debounced save helper ─────────────────────────────────────────────── */
@@ -247,8 +249,10 @@ export const useGlobalChatStore = create<GlobalChatState>((set, get) => ({
 
   // Editor integration
   editorCallbacks: null,
+  pendingEditorPrompt: null,
   registerEditorCallbacks: (callbacks) => set({ editorCallbacks: callbacks }),
   unregisterEditorCallbacks: () => set({ editorCallbacks: null }),
+  setPendingEditorPrompt: (prompt) => set({ pendingEditorPrompt: prompt }),
 
   deleteConversation: async (id) => {
     try {

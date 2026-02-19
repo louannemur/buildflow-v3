@@ -18,7 +18,7 @@ import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import {
-  ThinkingAnimation,
+  useTypewriter,
   DESIGN_THINKING,
 } from "@/components/features/thinking-animation";
 import {
@@ -246,24 +246,21 @@ export function DesignsContent() {
 
       {/* Batch generation progress */}
       {generating && genTotal > 0 && genProjectId === project.id && (
-        <>
-          <div className="mb-6 rounded-xl border border-border/60 bg-muted/30 p-4">
-            <div className="mb-2 flex items-center justify-between text-sm">
-              <span className="flex items-center gap-2 font-medium">
-                <Loader2 className="size-4 animate-spin" />
-                Generating designs...
-              </span>
-              <span className="text-muted-foreground">
-                {genProgress} / {genTotal}
-              </span>
-            </div>
-            <Progress
-              value={(genProgress / genTotal) * 100}
-              className="h-2"
-            />
+        <div className="mb-6 rounded-xl border border-border/60 bg-muted/30 p-4">
+          <div className="mb-2 flex items-center justify-between text-sm">
+            <span className="flex items-center gap-2 font-medium">
+              <Loader2 className="size-4 animate-spin" />
+              Generating designs...
+            </span>
+            <span className="text-muted-foreground">
+              {genProgress} / {genTotal}
+            </span>
           </div>
-          <ThinkingAnimation messages={DESIGN_THINKING} />
-        </>
+          <Progress
+            value={(genProgress / genTotal) * 100}
+            className="h-2"
+          />
+        </div>
       )}
 
       {/* Empty state — no pages */}
@@ -307,6 +304,8 @@ export function DesignsContent() {
 
             // Check if this page is currently being streamed
             const isStreaming = designStreamingPageId === page.id;
+            // Queued = batch is running, no design yet, not currently streaming
+            const isQueued = generating && !html && !isStreaming && genProjectId === project.id;
 
             return (
               <motion.div key={page.id} id={page.id} variants={staggerItem} className="h-full">
@@ -315,6 +314,7 @@ export function DesignsContent() {
                   design={design ? { ...design, html } : null}
                   isStyleGuide={design?.isStyleGuide ?? false}
                   isStreaming={isStreaming}
+                  isQueued={isQueued}
                   onClick={() => handleCardClick(page.id)}
                 />
               </motion.div>
@@ -335,12 +335,14 @@ function DesignCard({
   design,
   isStyleGuide,
   isStreaming,
+  isQueued,
   onClick,
 }: {
   page: ProjectPage;
   design: ProjectDesign | null;
   isStyleGuide: boolean;
   isStreaming?: boolean;
+  isQueued?: boolean;
   onClick: () => void;
 }) {
   const hasDesign = design && design.html && design.html.length > 0;
@@ -359,9 +361,11 @@ function DesignCard({
       {/* Thumbnail area */}
       <div className="relative aspect-[16/10] w-full overflow-hidden bg-muted/50">
         {isStreaming ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground/50">
-            <Loader2 className="size-6 animate-spin" />
-            <span className="text-xs font-medium">Generating...</span>
+          <StreamingCardOverlay />
+        ) : isQueued ? (
+          <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground/40">
+            <Clock className="size-5" />
+            <span className="text-xs font-medium">Queued</span>
           </div>
         ) : hasDesign && design.thumbnail ? (
           <Image
@@ -408,6 +412,26 @@ function DesignCard({
         )}
       </div>
     </Card>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/*  Streaming overlay — typewriter inside the card thumbnail                 */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+function StreamingCardOverlay() {
+  const displayText = useTypewriter(DESIGN_THINKING, 35, 1500);
+
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 px-4">
+      <Loader2 className="size-5 animate-spin text-muted-foreground/60" />
+      <div className="flex h-5 items-center">
+        <span className="text-xs font-medium text-muted-foreground">
+          {displayText}
+        </span>
+        <span className="ml-0.5 inline-block h-3 w-[1.5px] animate-pulse bg-muted-foreground/50" />
+      </div>
+    </div>
   );
 }
 

@@ -12,7 +12,7 @@ import { Toolbar } from "./Toolbar";
 import { StylePickerModal } from "./StylePickerModal";
 import { RegenerationModal } from "./RegenerationModal";
 import type { RegenerateConfig } from "./RegenerationModal";
-import { StyleMismatchModal } from "./StyleMismatchModal";
+import { StyleMismatchBar } from "./StyleMismatchModal";
 import { StreamingIndicator } from "./StreamingOverlay";
 import { useProjectStore } from "@/stores/project-store";
 import { VersionHistory } from "./VersionHistory";
@@ -22,6 +22,7 @@ import { UpgradeModal } from "@/components/features/upgrade-modal";
 import { extractHtmlFromStream } from "@/lib/ai/extract-code";
 import { readSSEStream } from "@/lib/sse-client";
 import { toast } from "sonner";
+import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
@@ -107,6 +108,9 @@ export function DesignEditor({
     setOnStreamChunk,
   } = useAIGenerate();
 
+  // Warn before leaving during active streaming/regeneration
+  useUnsavedChanges(streamPhase !== "idle" || isRegenerating);
+
   const globalChatAddMessage = useGlobalChatStore((s) => s.addMessage);
 
   const addMessage = useCallback(
@@ -158,15 +162,22 @@ export function DesignEditor({
 
     // Effects only run client-side, so window is always available here
     const params = new URLSearchParams(window.location.search);
-    if (params.get("autoGenerate") === "true") {
+    const isAutoGenerate = params.get("autoGenerate") === "true";
+
+    if (isAutoGenerate) {
       // Clean up URL param
       const url = new URL(window.location.href);
       url.searchParams.delete("autoGenerate");
       window.history.replaceState({}, "", url.toString());
-      // Start generation immediately
-      handleGenerateDesign("surprise");
-    } else {
-      setStylePickerOpen(true);
+    }
+
+    // Only auto-generate when explicitly triggered (e.g. from chat navigation)
+    if (isAutoGenerate) {
+      if (styleGuideCode && projectId && pageId) {
+        handleRegenerate({ useStyleGuide: true });
+      } else {
+        handleGenerateDesign("surprise");
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only run once on mount
   }, []);
@@ -410,14 +421,32 @@ export function DesignEditor({
 
   // Register editor callbacks so the global chat can dispatch design edits
   useEffect(() => {
-    useGlobalChatStore.getState().registerEditorCallbacks({
+    const store = useGlobalChatStore.getState();
+    store.registerEditorCallbacks({
       onEditDesign: handleEditDesign,
       onElementEdit: handleElementEdit,
       onAddSection: handleAddSection,
     });
+
+    // Check for a pending editor prompt (e.g. from home page chat navigation)
+    const pendingPrompt = store.pendingEditorPrompt;
+    if (pendingPrompt) {
+      store.setPendingEditorPrompt(null);
+      // If page has a design, edit it; otherwise generate first
+      if (source.trim()) {
+        // Small delay to let the editor fully mount
+        setTimeout(() => handleEditDesign(pendingPrompt), 500);
+      } else if (styleGuideCode && projectId && pageId) {
+        handleRegenerate({ useStyleGuide: true });
+      } else {
+        handleGenerateDesign("surprise");
+      }
+    }
+
     return () => {
       useGlobalChatStore.getState().unregisterEditorCallbacks();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-register when callbacks change
   }, [handleEditDesign, handleElementEdit, handleAddSection]);
 
   const handleRemoveElement = useCallback(
@@ -807,6 +836,17 @@ export function DesignEditor({
           <div className={mode === "code" ? "hidden" : "h-full"}>
             <Canvas iframeRef={iframeRef} onMoveElement={handleMoveElement} streamPhase={isRegenerating ? "streaming" : streamPhase} />
           </div>
+
+          {/* Style mismatch bar (non-blocking, bottom of canvas) */}
+          {projectId && pageId && (
+            <StyleMismatchBar
+              visible={styleMismatchOpen}
+              onMakeStyleGuide={handleMakeStyleGuide}
+              onRegenerateAgain={handleRegenerateAgain}
+              onRevert={handleRevertToStyleGuide}
+              isUpdatingOtherPages={isUpdatingOtherPages}
+            />
+          )}
         </div>
 
         {/* Streaming indicator (floating pill — positioned over the full editor area) */}
@@ -847,18 +887,6 @@ export function DesignEditor({
           onOpenChange={setRegenModalOpen}
           isStyleGuide={isStyleGuide}
           onRegenerate={handleRegenerate}
-        />
-      )}
-
-      {/* Style mismatch modal (shown after non-style-guide regeneration) */}
-      {projectId && pageId && (
-        <StyleMismatchModal
-          open={styleMismatchOpen}
-          onOpenChange={setStyleMismatchOpen}
-          onMakeStyleGuide={handleMakeStyleGuide}
-          onRegenerateAgain={handleRegenerateAgain}
-          onRevert={handleRevertToStyleGuide}
-          isUpdatingOtherPages={isUpdatingOtherPages}
         />
       )}
 

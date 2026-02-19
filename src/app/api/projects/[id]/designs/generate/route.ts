@@ -10,7 +10,7 @@ import {
   features,
 } from "@/lib/db/schema";
 import { getUserPlan, checkUsage, incrementUsage } from "@/lib/usage";
-import { generateDesign, generateDesignStream, inferPageType, reviewAndFixDesign } from "@/lib/ai/design";
+import { generateDesign, generateDesignStream, inferPageType, refinePageType, reviewAndFixDesign } from "@/lib/ai/design";
 import { extractHtmlFromResponse } from "@/lib/ai/extract-code";
 import { createSSEResponse } from "@/lib/sse";
 
@@ -195,12 +195,13 @@ export async function POST(
       sections.push("Hero section", "Features", "Call to action");
     }
 
-    const pageType = inferPageType(page.title);
+    const pageType = refinePageType(inferPageType(page.title), sections);
 
     const generationParams = {
       projectName: project.name,
       projectDescription: project.description ?? "",
       pageName: page.title,
+      pageDescription: page.description ?? undefined,
       pageType,
       sections,
       styleGuideCode,

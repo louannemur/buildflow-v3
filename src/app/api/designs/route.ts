@@ -33,6 +33,7 @@ export async function GET(req: Request) {
       columns: {
         id: true,
         name: true,
+        html: true,
         thumbnail: true,
         isStandalone: true,
         projectId: true,

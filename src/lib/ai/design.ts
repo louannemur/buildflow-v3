@@ -94,7 +94,68 @@ Page names (Home, About, Contact) are route names, NOT topics. A "Home" page is 
 Then in body: <i data-lucide="icon-name"></i>
 Then at end of body: <script>lucide.createIcons();</script>
 
-[Images]: For photos, use https://picsum.photos/{width}/{height} as placeholder URLs. Write DESCRIPTIVE alt attributes that describe the intended image (e.g., alt="team collaborating at a whiteboard" not alt="image"). For avatars use https://i.pravatar.cc/{size}. CSS gradients and colored shapes are PREFERRED over placeholder photos — they look better and load faster. Only use images when the design concept truly calls for photography.
+[Images]: Use contextually relevant, high-quality images from Unsplash. Pick images that match the project's industry and the SPECIFIC context of each image placement — NEVER use random/unrelated photos.
+
+URL format: https://images.unsplash.com/photo-{ID}?w={width}&h={height}&fit=crop&auto=format
+Each image below is labeled with what it depicts. Pick the image whose description best fits each placement.
+
+IMAGE LIBRARY (label=ID):
+TECHNOLOGY/SAAS:
+  laptop-on-desk=1488590528505-98d2b5aba04b, code-on-screen=1461749280684-dccba630e2f6, circuit-board-closeup=1518770660439-4636190af475, coworking-tech-space=1504384308090-c894fdcc538d, server-room=1550751827-4bd374c3f58b, data-globe-visualization=1451187580459-43490279c0fa, phone-and-laptop=1519389950473-47ba0277781c, macbook-minimal-desk=1531297484001-80022131f5a1, coding-workspace-dark=1498050108023-c5249f4df085, app-on-phone=1555066931-4365d14bab8c, person-typing-laptop=1537432376149-e83a4cf0ee0c
+BUSINESS/OFFICE:
+  team-collaborating-table=1522071820081-009f0129c71c, team-meeting-whiteboard=1552664730-d307ca884978, modern-open-office=1497366216548-37526070297c, strategy-planning-notes=1553877522-43269d4ea984, professional-handshake=1600880292203-757bb62b4baf, business-presentation=1542744173-8e7e91415657, office-desk-setup=1556761175-5973dc0f32e7, woman-leading-meeting=1573164713714-d95e436ab8d6
+FOOD/RESTAURANT:
+  overhead-plated-meal=1504674900247-0877df9cc836, fine-dining-table=1414235077428-338989a2e8c0, colorful-food-spread=1476224203421-9ac39bcb3327, restaurant-interior=1555396273-367ea4eb4db5, chef-cooking-kitchen=1567620905862-fe2e4a2e9bde, fresh-ingredients=1565299624946-b28f40a0ae38, sushi-platter=1540189549336-e6e99c3679fe, breakfast-brunch=1495521821757-a1efb6729352, pizza-closeup=1546069901-ba9599a7e63c
+COFFEE/CAFE:
+  coffee-shop-interior=1495474472287-4d71bcdd2085, latte-art-cup=1501339847302-ac426a4a7cbb, espresso-machine=1509042239860-f550ce710b93, coffee-beans-closeup=1447933601403-56dc1e40d5ef, cozy-cafe-window=1445116572660-236099ec97a0
+NATURE/OUTDOORS:
+  foggy-forest-path=1470071459604-3b5ec3a7fe05, tall-green-trees=1441974231531-c6227db76b6e, sunset-over-mountains=1469474968028-56623f02e42e, tropical-beach=1507525428034-b723cf961d3e, mountain-lake-reflection=1433086966358-54859d0ed716, wildflower-field=1501854140801-50d01698950b, waterfall-rocks=1418065460487-3a9ca7044f45, autumn-leaves=1470252649378-9c29740c9fa8
+PEOPLE/PORTRAITS:
+  friends-laughing-together=1529156069898-49953e39b3ac, young-woman-portrait=1517841905240-472988babdf9, man-portrait-serious=1506794778202-cad84cf45f1d, woman-holding-coffee=1488161628813-04466f0cc7d4, professional-woman-smiling=1494790108377-be9c29b29330, professional-man-casual=1507003211169-0a1dd7228f2d, woman-smiling-outdoors=1438761681033-6461ffad8d80, man-headshot-friendly=1472099645785-5658abf4ff4e
+FITNESS/WELLNESS:
+  yoga-pose-studio=1571019613454-1cb2f99b2d8b, gym-weights-equipment=1534438327276-14e5300c3a48, meditation-outdoors=1544367567-0f2fcb009e0b, person-running=1545205597-3d9d02c29597, stretching-exercise=1574680096145-d05b13c7f0a7, swimming-pool=1518611012118-696072aa579a, healthy-food-bowl=1540497077202-7c8a3999166f
+EDUCATION:
+  graduation-caps-tossed=1523050854058-8df90110c9f1, lecture-hall-class=1524178232363-1fb2b075b655, studying-with-books=1456513080510-7bf3a84b82f8, classroom-discussion=1503676260728-1c00da094a0b, open-book-pages=1427504494785-3a9ca7044f45, student-with-laptop=1509062522246-3755977927d7
+ARCHITECTURE/REALESTATE:
+  glass-skyscrapers=1486406146926-c627a92ad1ab, white-modern-building=1487958449943-2429e8be8625, house-keys-handover=1560518883-ce09059eeffa, modern-house-exterior=1512917774080-9991f1c4c750, luxury-home-interior=1600585154340-be6161a56a0c, apartment-building=1600596542815-ffad4c1539a9
+TRAVEL:
+  suitcase-travel=1488646953014-85cb44e25828, scenic-mountain-lake=1476514525535-07fb3b4ae5f1, beach-adventure=1503220317375-aaad61436b1b, road-trip-highway=1469854523086-cc02fe5d8800, hot-air-balloon=1530789253388-582c481c54b0, airplane-window-view=1467269204594-9661b134dd2b, world-map-compass=1502920917128-1aa500764cbd
+ECOMMERCE/SHOPPING:
+  shopping-bags=1441986300917-64674bd600d8, retail-store-display=1472851294608-062f824d29cc, minimal-product-shot=1560472354-b33ff0c44a43, clothing-rack=1556742049-0cfed4f6a45d, gift-boxes=1523275335684-37898b6baf30, package-unboxing=1607082348824-0a96f2a4b9da
+MUSIC/ENTERTAINMENT:
+  instruments-closeup=1511379938547-c1f69419868d, concert-crowd-lights=1470229722913-7c0e2dbbafd3, headphones-music=1514320291840-2e0a9bf2a9ae, dj-turntable-setup=1493225457124-a3eb161ffa5f, guitar-player=1459749411175-04bf5292ceea, stage-lights=1516450360452-9312f5e86fc7
+HEALTHCARE/MEDICAL:
+  doctor-stethoscope=1576091160399-112ba8d25d1d, hospital-hallway=1631815588090-d4bfec5b1b98, medical-team=1559757175-5700dde675bc, medicine-pills=1530497610245-94d3c16cda28, nurse-patient-care=1579684385127-1ef15d508118
+FINANCE/BANKING:
+  credit-cards=1611974789855-d206d2ea754b, stock-chart-screen=1554224155-6726b3ff858f, savings-coins-jar=1460925895917-afdab827c52f, financial-planning-desk=1579621970563-9ae2e01248e6, calculator-documents=1565514020179-026b92b84bb6
+PETS/ANIMALS:
+  golden-retriever-dog=1587300003388-59208cc962cb, cat-portrait-closeup=1415369629372-26f2fe60c467, playful-puppy=1548199973-03cce0bbc87b, horse-field=1437622368342-7a3d73a34c8f, tropical-bird=1450778869180-e05e54c62e16
+FASHION/BEAUTY:
+  fashion-photoshoot=1445205170230-053b83016050, skincare-products=1512496015851-a90fb38ba796, fashion-accessories=1487412912498-0447578fcca8, makeup-beauty=1558171813-4c2ab3ef3764, model-street-style=1469334031218-e382a71b716b
+AUTOMOTIVE:
+  classic-car-vintage=1494976388531-d1058494cdd8, modern-car-road=1492144534655-ae79c964c9d7, car-dashboard-interior=1503376780353-7e6692767b70, electric-car-charging=1544636331-e26879cd4d9b
+SPORTS:
+  basketball-game=1461896836934-ffe607ba8211, soccer-field=1579952363873-27f3bade9f55, tennis-court=1530549387789-4c1017266635, cycling-road=1517649763962-0c623066013b
+GAMING/ESPORTS:
+  gaming-setup-rgb=1538481199705-c710c4e965fc, game-controller=1493711662062-fa541adb3fc8, esports-arena=1542751371-adc38448a05e
+HOME/INTERIOR:
+  modern-living-room=1484101403633-562f891dc89a, cozy-bedroom=1556909114-f6e7ad7d3136, modern-kitchen=1556909212-d5b604d0c90d, minimalist-room=1507089947017-82a3fdd59bec
+KIDS/FAMILY:
+  family-playing-outdoors=1536640712-4d4c36ff0e4e, child-playing=1503454537195-1dcabb73ffb9, baby-portrait=1484820540004-14229fe36ca4
+WEDDING/EVENTS:
+  wedding-ceremony=1519741497674-611481863552, party-celebration=1464366400600-7168b8af9bc3, event-planning-table=1478146059778-acee1cc14028
+ABSTRACT/CREATIVE:
+  colorful-paint-swirls=1557672172-298e090bd0f1, gradient-light-leak=1550859492-d5da9d8e45f3, geometric-patterns=1558591710-4b4a1ae0f04d, neon-lights-glow=1579546929518-9e396f3cc311, marble-texture=1557682250583-56a7f59e4e88, paint-splatter-art=1541701494587-cb58502866ab
+
+RULES:
+- Analyze the project name and description to pick the RIGHT category, then pick specific images by their label
+- Match the label to the context — e.g., for a hero about "our team", use team-collaborating-table, not circuit-board-closeup
+- Use DIFFERENT images across the page — never repeat the same photo ID
+- Write DESCRIPTIVE alt text matching the label (e.g., alt="team collaborating around a table")
+- For avatars/profile photos, use https://i.pravatar.cc/{size}?img={1-70} (use different img numbers for different people)
+- CSS gradients and colored shapes are PREFERRED over photos when the design doesn't need photography. Only use images when the design concept truly calls for photography
+- You may combine images from MULTIPLE categories if the project spans topics (e.g., a fitness app might use FITNESS + PEOPLE + FOOD images)
+- If the project doesn't fit any category, pick the CLOSEST match or use ABSTRACT
 
 ANIMATION LIBRARIES — use via CDN as appropriate:
 - GSAP: <script src="https://unpkg.com/gsap@3/dist/gsap.min.js"></script> and <script src="https://unpkg.com/gsap@3/dist/ScrollTrigger.min.js"></script>
@@ -221,8 +282,9 @@ IMPORTANT: This is a functional settings interface, NOT a marketing page. Do NOT
 Design an organized preferences UI: sidebar navigation for setting categories, grouped controls with labels and descriptions, custom toggles/switches, input fields, dropdown selects, danger zone for destructive actions, and save/cancel buttons. Think GitHub Settings or Stripe account page.`;
     case "AUTH":
       return `PAGE TYPE: AUTHENTICATION PAGE (Login / Register / Sign Up).
-IMPORTANT: This is a functional auth form, NOT a marketing page. Do NOT design a landing page or hero section.
-Design a focused authentication experience: centered or split-layout form with email/password fields (custom-styled, not native browser inputs), social login buttons (Google, GitHub, etc.), password visibility toggle, "forgot password" link, and a switch between login/signup. The form should be the primary focus — minimal distractions. Consider a decorative side panel or subtle background, but the form IS the page. Think Vercel login, Linear signup, or Stripe auth.`;
+IMPORTANT: This is a functional auth form, NOT a marketing page. Do NOT design a landing page or hero section. Do NOT include the app's navigation bar or header — auth pages stand alone.
+Design a focused authentication experience: centered or split-layout form with email/password fields (custom-styled, not native browser inputs), social login buttons (Google, GitHub, etc.), password visibility toggle, "forgot password" link, and a switch between login/signup. The form should be the primary focus — minimal distractions. Consider a decorative side panel or subtle background, but the form IS the page.
+STYLE GUIDE ADHERENCE: Even though this page has no nav bar, it MUST use the exact same font family, color palette (background colors, accent color), border radius, and spacing rhythm from the style guide tokens. The login page should feel like it belongs to the same app — same brand, same visual DNA, just without the app chrome.`;
     case "MOBILE_APP":
       return `PAGE TYPE: MOBILE APP SCREEN.
 IMPORTANT: This is a mobile app screen design. Design for a 375px-wide mobile viewport as the PRIMARY experience.
@@ -230,8 +292,8 @@ Design a native-feeling mobile app interface: bottom tab navigation or top navig
 The design MUST use w-full and fill the viewport width naturally. Use min-h-screen. No max-width containers — content should go edge-to-edge. On larger viewports (tablet/desktop), the design should still stretch to fill the available width gracefully.`;
     case "CUSTOM":
     default:
-      return `PAGE TYPE: CUSTOM — analyze the page name carefully.
-IMPORTANT: Do NOT default to a marketing landing page. Look at the page name and determine its actual purpose. If it's a functional page (registration, dashboard, settings, etc.), design the appropriate UI for that purpose. Only design a marketing/landing page if the name clearly indicates one (like "Home" or "Landing Page").`;
+      return `PAGE TYPE: CUSTOM — analyze the page name AND the content sections carefully.
+IMPORTANT: Do NOT default to a marketing landing page. Look at the page content sections to determine this page's actual purpose. If the sections describe app UI (feeds, posts, navigation, filters, etc.), design a functional application interface — NOT a marketing/landing page. Only design a marketing/landing page if the sections clearly describe marketing content (hero, testimonials, pricing, etc.).`;
   }
 }
 
@@ -285,12 +347,78 @@ export function inferPageType(pageName: string): string {
   return "CUSTOM";
 }
 
+/**
+ * Refine the page type using user-defined section names.
+ * If the inferred type is LANDING but the sections describe app UI
+ * (feeds, filters, posts, navigation, etc.), override to the correct type.
+ */
+export function refinePageType(
+  inferredType: string,
+  sections: string[],
+): string {
+  // Only refine when sections are user-defined (not fallback "Hero section, Features, ...")
+  if (sections.length === 0) return inferredType;
+
+  const joined = sections.map((s) => s.toLowerCase()).join(" ");
+
+  // App interface indicators — if sections describe these, it's NOT a marketing page
+  const appUiPatterns = [
+    /\b(feed|timeline|stream|posts?|stories|reels)\b/,
+    /\b(create\s+post|new\s+post|compose|write\s+post|upload)\b/,
+    /\b(navigation\s+menu|bottom\s+nav|tab\s+bar|side\s+menu|app\s+bar)\b/,
+    /\b(notifications?\s+(?:list|panel|center|bell))\b/,
+    /\b(chat\s+list|message\s+list|conversations?|inbox)\b/,
+    /\b(user\s+profile|profile\s+card|avatar|follow)\b/,
+    /\b(search\s+bar|filter|sort|category\s+filter)\b/,
+    /\b(cart|checkout|order\s+summary|payment)\b/,
+    /\b(playlist|queue|player|now\s+playing|library)\b/,
+    /\b(map\s+view|location|nearby)\b/,
+  ];
+
+  const dashboardPatterns = [
+    /\b(dashboard|analytics|metrics|kpi|chart|graph|stat)/,
+    /\b(data\s+table|recent\s+activity|overview\s+cards?)/,
+  ];
+
+  const listPatterns = [
+    /\b(content\s+feed|browse|catalog|directory|collection|grid\s+view|list\s+view)/,
+  ];
+
+  const formPatterns = [
+    /\b(form|input\s+field|submit|registration\s+form)/,
+  ];
+
+  // Check if sections describe a dashboard
+  if (dashboardPatterns.some((p) => p.test(joined))) {
+    return "DASHBOARD";
+  }
+
+  // Check if sections describe a list/browse interface
+  if (listPatterns.some((p) => p.test(joined))) {
+    return "LIST";
+  }
+
+  // Check if sections describe a form
+  if (formPatterns.some((p) => p.test(joined))) {
+    return "FORM";
+  }
+
+  // Check if sections describe app UI — override LANDING or CUSTOM to CUSTOM with app hints
+  const hasAppUi = appUiPatterns.filter((p) => p.test(joined)).length >= 2;
+  if (hasAppUi && (inferredType === "LANDING" || inferredType === "CUSTOM")) {
+    return "CUSTOM";
+  }
+
+  return inferredType;
+}
+
 // ── Core AI Functions (Gemini) ───────────────────────────────────
 
 interface GenerateDesignParams {
   projectName: string;
   projectDescription: string;
   pageName: string;
+  pageDescription?: string;
   pageType: string;
   sections: string[];
   styleGuideCode?: string;
@@ -308,6 +436,7 @@ export async function generateDesign(
     projectName,
     projectDescription,
     pageName,
+    pageDescription,
     pageType,
     sections,
     styleGuideCode,
@@ -354,8 +483,9 @@ export async function generateDesign(
   }
 
   // Navigation HTML from style guide — replicate exact nav bar structure
+  // Skip for AUTH pages (login/signup should NOT have the app's nav bar)
   let navHtmlContext = "";
-  if (styleGuideCode) {
+  if (styleGuideCode && pageType !== "AUTH") {
     const navHtml = extractNavigationHtml(styleGuideCode);
     if (navHtml) {
       navHtmlContext = `\n\nSTYLE GUIDE NAVIGATION (replicate this exact nav bar structure, links, and styling on this page):\n\`\`\`html\n${navHtml}\n\`\`\``;
@@ -375,17 +505,30 @@ export async function generateDesign(
     consistencyContext = `\n\nOTHER DESIGNED PAGES (match their style for visual consistency):\n${summaries.join("\n")}`;
   }
 
+  // Format sections as a structured list so the AI treats each as a distinct content block
+  const sectionsBlock = sections.map((s, i) => `${i + 1}. ${s}`).join("\n");
+
+  // Full style guide HTML reference — lets the AI see the actual design, not just tokens
+  let styleGuideHtmlRef = "";
+  if (styleGuideCode) {
+    styleGuideHtmlRef = `\n\nSTYLE GUIDE — FULL REFERENCE (this is the project's existing designed page — match its visual identity exactly: same colors, fonts, button styles, card patterns, gradients, hover effects, spacing, and overall aesthetic):
+\`\`\`html
+${styleGuideCode}
+\`\`\``;
+  }
+
   const systemPrompt = `${DESIGN_SYSTEM_PROMPT}${archetypeDirective}${styleTokenContext}`;
 
   const userMessage = `Design a ${pageType} page for "${projectName}".
 
 Project: ${projectDescription}
-Page: "${pageName}" (${pageType})
+Page: "${pageName}" (${pageType})${pageDescription ? `\nPage purpose: ${pageDescription}` : ""}
 ${pageGuidance}
 
-Sections to include: ${sections.join(", ")}
-${pageListContext}${navHtmlContext}${consistencyContext}${creativeSeedContext}${componentsContext}
-${styleGuideCode ? "\nThis page MUST follow the style guide tokens above — same font, same colors, same spacing. Only the page content/layout differs." : ""}
+PAGE CONTENT — the user defined exactly what should be on this page. Design the actual UI for EACH item below (these are NOT marketing section suggestions — they describe real app features/content):
+${sectionsBlock}
+${pageListContext}${navHtmlContext}${consistencyContext}${creativeSeedContext}${componentsContext}${styleGuideHtmlRef}
+${styleGuideCode ? `\nThis page MUST follow the style guide above — same font, same colors, same button styles, same visual aesthetic. Only the page content/layout differs.${pageType === "AUTH" ? " This is an auth page so it has NO navigation bar, but it MUST still use the exact same font family, background colors, accent color, and border radius from the style guide. The auth page should feel unmistakably part of the same brand." : ""}` : ""}
 Remember: ONE visual concept. Make it award-winning. Output a complete HTML document.`;
 
   const temperature = styleGuideCode ? 0.7 : 0.95;
@@ -415,6 +558,7 @@ export async function* generateDesignStream(
     projectName,
     projectDescription,
     pageName,
+    pageDescription,
     pageType,
     sections,
     styleGuideCode,
@@ -459,8 +603,9 @@ export async function* generateDesignStream(
     pageListContext = `\n\nPROJECT PAGES (use these as navigation links): ${allPageNames.join(", ")}`;
   }
 
+  // Skip nav HTML for AUTH pages (login/signup should NOT have the app's nav bar)
   let navHtmlContext = "";
-  if (styleGuideCode) {
+  if (styleGuideCode && pageType !== "AUTH") {
     const navHtml = extractNavigationHtml(styleGuideCode);
     if (navHtml) {
       navHtmlContext = `\n\nSTYLE GUIDE NAVIGATION (replicate this exact nav bar structure, links, and styling on this page):\n\`\`\`html\n${navHtml}\n\`\`\``;
@@ -477,17 +622,30 @@ export async function* generateDesignStream(
     consistencyContext = `\n\nOTHER DESIGNED PAGES (match their style for visual consistency):\n${summaries.join("\n")}`;
   }
 
+  // Format sections as a structured list so the AI treats each as a distinct content block
+  const sectionsBlock = sections.map((s, i) => `${i + 1}. ${s}`).join("\n");
+
+  // Full style guide HTML reference — lets the AI see the actual design, not just tokens
+  let styleGuideHtmlRef = "";
+  if (styleGuideCode) {
+    styleGuideHtmlRef = `\n\nSTYLE GUIDE — FULL REFERENCE (this is the project's existing designed page — match its visual identity exactly: same colors, fonts, button styles, card patterns, gradients, hover effects, spacing, and overall aesthetic):
+\`\`\`html
+${styleGuideCode}
+\`\`\``;
+  }
+
   const systemPrompt = `${DESIGN_SYSTEM_PROMPT}${archetypeDirective}${styleTokenContext}`;
 
   const userMessage = `Design a ${pageType} page for "${projectName}".
 
 Project: ${projectDescription}
-Page: "${pageName}" (${pageType})
+Page: "${pageName}" (${pageType})${pageDescription ? `\nPage purpose: ${pageDescription}` : ""}
 ${pageGuidance}
 
-Sections to include: ${sections.join(", ")}
-${pageListContext}${navHtmlContext}${consistencyContext}${creativeSeedContext}${componentsContext}
-${styleGuideCode ? "\nThis page MUST follow the style guide tokens above — same font, same colors, same spacing. Only the page content/layout differs." : ""}
+PAGE CONTENT — the user defined exactly what should be on this page. Design the actual UI for EACH item below (these are NOT marketing section suggestions — they describe real app features/content):
+${sectionsBlock}
+${pageListContext}${navHtmlContext}${consistencyContext}${creativeSeedContext}${componentsContext}${styleGuideHtmlRef}
+${styleGuideCode ? `\nThis page MUST follow the style guide above — same font, same colors, same button styles, same visual aesthetic. Only the page content/layout differs.${pageType === "AUTH" ? " This is an auth page so it has NO navigation bar, but it MUST still use the exact same font family, background colors, accent color, and border radius from the style guide. The auth page should feel unmistakably part of the same brand." : ""}` : ""}
 Remember: ONE visual concept. Make it award-winning. Output a complete HTML document.`;
 
   const temperature = styleGuideCode ? 0.7 : 0.95;

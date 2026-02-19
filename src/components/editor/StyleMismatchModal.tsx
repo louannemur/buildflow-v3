@@ -1,101 +1,72 @@
 "use client";
 
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Star, RefreshCw, Undo2, Loader2 } from "lucide-react";
 
-interface StyleMismatchModalProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+interface StyleMismatchBarProps {
+  visible: boolean;
   onMakeStyleGuide: () => void;
   onRegenerateAgain: () => void;
   onRevert: () => void;
   isUpdatingOtherPages: boolean;
 }
 
-export function StyleMismatchModal({
-  open,
-  onOpenChange,
+export function StyleMismatchBar({
+  visible,
   onMakeStyleGuide,
   onRegenerateAgain,
   onRevert,
   isUpdatingOtherPages,
-}: StyleMismatchModalProps) {
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={isUpdatingOtherPages ? undefined : onOpenChange}
-    >
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>
-            {isUpdatingOtherPages
-              ? "Updating style guide..."
-              : "This design doesn\u2019t match the style guide"}
-          </DialogTitle>
-          <DialogDescription>
-            {isUpdatingOtherPages
-              ? "Regenerating other pages to match the new style guide. This may take a moment."
-              : "The regenerated design uses a different style. What would you like to do?"}
-          </DialogDescription>
-        </DialogHeader>
+}: StyleMismatchBarProps) {
+  if (!visible) return null;
 
-        <div className="space-y-2">
+  return (
+    <div className="absolute inset-x-0 bottom-0 z-30 border-t border-border/60 bg-background/95 backdrop-blur-sm">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <p className="shrink-0 text-sm font-medium text-foreground">
+          {isUpdatingOtherPages
+            ? "Updating other pages..."
+            : "This design doesn\u2019t match the style guide"}
+        </p>
+
+        <div className="ml-auto flex items-center gap-2">
           <Button
-            className="h-auto w-full justify-start gap-3 py-3"
+            size="sm"
             onClick={onMakeStyleGuide}
             disabled={isUpdatingOtherPages}
+            className="gap-1.5"
           >
             {isUpdatingOtherPages ? (
-              <Loader2 className="size-4 shrink-0 animate-spin" />
+              <Loader2 className="size-3.5 animate-spin" />
             ) : (
-              <Star className="size-4 shrink-0" />
+              <Star className="size-3.5" />
             )}
-            <div className="text-left">
-              <div className="font-medium">Make this the new style guide</div>
-              <div className="text-xs font-normal opacity-80">
-                Update all other pages to match this style
-              </div>
-            </div>
+            Make style guide
           </Button>
 
           <Button
+            size="sm"
             variant="outline"
-            className="h-auto w-full justify-start gap-3 py-3"
             onClick={onRegenerateAgain}
             disabled={isUpdatingOtherPages}
+            className="gap-1.5"
           >
-            <RefreshCw className="size-4 shrink-0" />
-            <div className="text-left">
-              <div className="font-medium">Try a different style</div>
-              <div className="text-xs text-muted-foreground">
-                Regenerate this page with a new approach
-              </div>
-            </div>
+            <RefreshCw className="size-3.5" />
+            Try different style
           </Button>
 
           <Button
+            size="sm"
             variant="outline"
-            className="h-auto w-full justify-start gap-3 py-3"
             onClick={onRevert}
             disabled={isUpdatingOtherPages}
+            className="gap-1.5"
           >
-            <Undo2 className="size-4 shrink-0" />
-            <div className="text-left">
-              <div className="font-medium">Revert to previous version</div>
-              <div className="text-xs text-muted-foreground">
-                Go back to the version that matched the style guide
-              </div>
-            </div>
+            <Undo2 className="size-3.5" />
+            Revert
           </Button>
         </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   );
 }

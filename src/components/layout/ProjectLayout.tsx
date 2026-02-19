@@ -208,6 +208,7 @@ function UserMenu() {
 function SidebarContent({
   project,
   activeStep,
+  activeItemId,
   onStepClick,
   onOverviewClick,
   onItemClick,
@@ -215,6 +216,7 @@ function SidebarContent({
 }: {
   project: ProjectData;
   activeStep: ProjectStep | null;
+  activeItemId?: string | null;
   onStepClick: (step: ProjectStep) => void;
   onOverviewClick: () => void;
   onItemClick: (step: ProjectStep, itemId: string) => void;
@@ -344,15 +346,23 @@ function SidebarContent({
                   {items.length > 0 && (
                     <CollapsibleContent>
                       <div className="space-y-0.5 pb-2 pl-2">
-                        {items.map((item) => (
-                          <button
-                            key={item.id}
-                            onClick={() => onItemClick(step.key, item.id)}
-                            className="flex w-full items-center rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-                          >
-                            <span className="truncate">{item.title}</span>
-                          </button>
-                        ))}
+                        {items.map((item) => {
+                          const isItemActive = isActive && activeItemId === item.id;
+                          return (
+                            <button
+                              key={item.id}
+                              onClick={() => onItemClick(step.key, item.id)}
+                              className={cn(
+                                "flex w-full items-center rounded-md px-2 py-1.5 text-xs transition-colors",
+                                isItemActive
+                                  ? "bg-primary/10 font-medium text-primary"
+                                  : "text-muted-foreground hover:text-foreground",
+                              )}
+                            >
+                              <span className="truncate">{item.title}</span>
+                            </button>
+                          );
+                        })}
                       </div>
                     </CollapsibleContent>
                   )}
@@ -397,11 +407,17 @@ export function ProjectLayout({
   const [mobileOpen, setMobileOpen] = useState(false);
 
   // Derive active step from the current URL path
+  // Handles both /project/[id]/designs and /project/[id]/designs/[pageId]
   const pathSegments = pathname.split("/");
   const lastSegment = pathSegments[pathSegments.length - 1];
+  const stepSegment = pathSegments[3]; // segment after /project/[id]/
   const stepFromPath = ["features", "flows", "pages", "designs", "build"].includes(lastSegment)
     ? (lastSegment as ProjectStep)
-    : null;
+    : ["features", "flows", "pages", "designs", "build"].includes(stepSegment)
+      ? (stepSegment as ProjectStep)
+      : null;
+  // Active item ID when viewing a sub-page (e.g. /designs/[pageId])
+  const activeItemId = stepFromPath && pathSegments[4] ? pathSegments[4] : null;
 
   // null = overview page (base project URL with no step segment)
   const isBasePath = /^\/project\/[^/]+$/.test(pathname);
@@ -497,6 +513,7 @@ export function ProjectLayout({
                   <SidebarContent
                     project={project}
                     activeStep={activeStep}
+                    activeItemId={activeItemId}
                     onStepClick={handleStepClick}
                     onOverviewClick={handleOverviewClick}
                     onItemClick={handleItemClick}
@@ -533,9 +550,9 @@ export function ProjectLayout({
           </div>
         </header>
 
-        <div className="flex flex-1">
+        <div className="relative flex flex-1">
           {/* Desktop sidebar */}
-          {sidebarOpen ? (
+          {sidebarOpen && (
             <aside
               className="hidden shrink-0 border-r border-border/50 bg-sidebar transition-[width] duration-200 ease-in-out md:block w-60"
             >
@@ -543,6 +560,7 @@ export function ProjectLayout({
                 <SidebarContent
                   project={project}
                   activeStep={activeStep}
+                  activeItemId={activeItemId}
                   onStepClick={handleStepClick}
                   onOverviewClick={handleOverviewClick}
                   onItemClick={handleItemClick}
@@ -550,19 +568,20 @@ export function ProjectLayout({
                 />
               </div>
             </aside>
-          ) : (
-            <aside className="hidden shrink-0 md:block">
-              <div className="sticky top-14 p-2">
-                <button
-                  onClick={toggleSidebar}
-                  className="flex items-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted/50"
-                  title="Expand sidebar"
-                >
-                  <span className="max-w-[120px] truncate">{project.name}</span>
-                  <PanelLeft className="size-4 shrink-0 text-muted-foreground" />
-                </button>
-              </div>
-            </aside>
+          )}
+
+          {/* Collapsed sidebar expand button — floats over content */}
+          {!sidebarOpen && (
+            <div className="absolute left-2 top-2 z-30 hidden md:block">
+              <button
+                onClick={toggleSidebar}
+                className="flex items-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted/50"
+                title="Expand sidebar"
+              >
+                <span className="max-w-[120px] truncate">{project.name}</span>
+                <PanelLeft className="size-4 shrink-0 text-muted-foreground" />
+              </button>
+            </div>
           )}
 
           {/* Main content */}

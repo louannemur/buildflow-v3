@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { eq, count, desc, and, ne } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { projects } from "@/lib/db/schema";
+import { projects, designs } from "@/lib/db/schema";
 import { createProjectSchema } from "@/lib/validators/project";
 import { getPlanLimits } from "@/lib/plan-limits";
 import { getUserPlan, incrementUsage } from "@/lib/usage";
@@ -51,6 +51,31 @@ export async function GET(req: Request) {
       },
     });
 
+    // Fetch style guide design HTML for each project (for card previews)
+    const projectIds = items.map((p) => p.id);
+    const styleGuides =
+      projectIds.length > 0
+        ? await db.query.designs.findMany({
+            where: and(
+              eq(designs.userId, userId),
+              eq(designs.isStyleGuide, true),
+            ),
+            columns: { projectId: true, html: true },
+          })
+        : [];
+
+    const styleGuideMap = new Map<string, string>();
+    for (const sg of styleGuides) {
+      if (sg.projectId && sg.html && sg.html.length > 0) {
+        styleGuideMap.set(sg.projectId, sg.html);
+      }
+    }
+
+    const itemsWithPreview = items.map((p) => ({
+      ...p,
+      previewHtml: styleGuideMap.get(p.id) ?? null,
+    }));
+
     // Get total count for limit info
     const [{ value: total }] = await db
       .select({ value: count() })
@@ -66,7 +91,7 @@ export async function GET(req: Request) {
     const limits = getPlanLimits(plan);
 
     return NextResponse.json(
-      { items, total, maxProjects: limits.maxProjects },
+      { items: itemsWithPreview, total, maxProjects: limits.maxProjects },
       { status: 200 },
     );
   } catch {

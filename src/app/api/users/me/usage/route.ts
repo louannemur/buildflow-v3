@@ -1,13 +1,17 @@
 import { NextResponse } from "next/server";
-import { eq, and } from "drizzle-orm";
+import { eq, and, count } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { subscriptions, usage } from "@/lib/db/schema";
+import { subscriptions, usage, projects, designs } from "@/lib/db/schema";
 import { getPlanLimits, type Plan } from "@/lib/plan-limits";
 
 function getCurrentPeriod() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function getCurrentDate() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 /** Infinity → 999_999 so it survives JSON serialization */
@@ -22,20 +26,39 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const [sub, currentUsage] = await Promise.all([
+    const userId = session.user.id;
+
+    const [sub, currentUsage, projectCount, designCount] = await Promise.all([
       db.query.subscriptions.findFirst({
-        where: eq(subscriptions.userId, session.user.id),
+        where: eq(subscriptions.userId, userId),
       }),
       db.query.usage.findFirst({
         where: and(
-          eq(usage.userId, session.user.id),
+          eq(usage.userId, userId),
           eq(usage.period, getCurrentPeriod()),
         ),
       }),
+      // Count actual existing projects
+      db
+        .select({ value: count() })
+        .from(projects)
+        .where(eq(projects.userId, userId)),
+      // Count actual existing designs
+      db
+        .select({ value: count() })
+        .from(designs)
+        .where(eq(designs.userId, userId)),
     ]);
 
     const plan = (sub?.plan ?? "free") as Plan;
     const limits = getPlanLimits(plan);
+
+    // Use daily count for design generations, not the monthly cumulative total
+    const today = getCurrentDate();
+    const dailyDesignGens =
+      currentUsage?.dailyDesignDate === today
+        ? (currentUsage.dailyDesignCount ?? 0)
+        : 0;
 
     return NextResponse.json({
       subscription: {
@@ -46,16 +69,16 @@ export async function GET() {
         cancelAtPeriodEnd: sub?.cancelAtPeriodEnd ?? false,
       },
       usage: {
-        designGenerations: currentUsage?.designGenerations ?? 0,
-        aiGenerations: currentUsage?.aiGenerations ?? 0,
-        projectsCreated: currentUsage?.projectsCreated ?? 0,
-        designsSaved: currentUsage?.designsSaved ?? 0,
+        designGenerations: dailyDesignGens,
+        projectTokensUsed: currentUsage?.projectTokensUsed ?? 0,
+        projectsCreated: projectCount[0]?.value ?? 0,
+        designsSaved: designCount[0]?.value ?? 0,
       },
       limits: {
         maxProjects: safeLimit(limits.maxProjects),
         maxDesigns: safeLimit(limits.maxDesigns),
         maxDesignGenerationsPerDay: safeLimit(limits.maxDesignGenerationsPerDay),
-        maxAiGenerationsPerMonth: safeLimit(limits.maxAiGenerationsPerMonth),
+        maxProjectTokensPerMonth: safeLimit(limits.maxProjectTokensPerMonth),
       },
     });
   } catch {

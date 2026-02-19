@@ -4,7 +4,7 @@ import { auth } from "@/lib/auth";
 import { anthropic } from "@/lib/ai";
 import { db } from "@/lib/db";
 import { features, userFlows, projects } from "@/lib/db/schema";
-import { getUserPlan, checkUsage, incrementUsage } from "@/lib/usage";
+import { getUserPlan, checkUsage, incrementTokenUsage } from "@/lib/usage";
 import { createSSEResponse } from "@/lib/sse";
 
 const SYSTEM_PROMPT = `You are a UX designer. Given the project info and features, generate the key user flows.
@@ -97,6 +97,12 @@ export async function POST(
         }
       }
 
+      // Get token usage from the completed stream
+      const finalMessage = await stream.finalMessage();
+      const tokensUsed =
+        (finalMessage.usage?.input_tokens ?? 0) +
+        (finalMessage.usage?.output_tokens ?? 0);
+
       const jsonMatch = accumulated.match(/\[[\s\S]*\]/);
       if (!jsonMatch) {
         enqueue({
@@ -135,8 +141,8 @@ export async function POST(
         )
         .returning();
 
-      // Increment AI usage
-      await incrementUsage(userId, "aiGenerations");
+      // Increment token usage
+      await incrementTokenUsage(userId, tokensUsed);
 
       // Emit each flow individually for animated reveal
       for (const flow of newFlows) {

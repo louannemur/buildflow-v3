@@ -586,6 +586,10 @@ export function BuildContent() {
       if (res.ok) {
         setPublishedUrl(null);
         setPublishStale(false);
+        // The slug was just freed — mark it as available so the publish button is enabled
+        if (publishSlug && publishSlug.length >= 3) {
+          setSlugAvailable(true);
+        }
         toast.success("Site unpublished.");
       }
     } catch {
@@ -593,7 +597,7 @@ export function BuildContent() {
     } finally {
       setUnpublishing(false);
     }
-  }, [project, unpublishing]);
+  }, [project, unpublishing, publishSlug]);
 
   // ─── Computed values ──────────────────────────────────────────────
 

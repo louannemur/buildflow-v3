@@ -316,6 +316,13 @@ export function FeaturesContent() {
     setEditDesc(feature.description);
   }
 
+  function closeEditDialog() {
+    if (editTarget && (editTitle !== editTarget.title || editDesc !== editTarget.description)) {
+      if (!window.confirm("You have unsaved changes. Discard them?")) return;
+    }
+    setEditTarget(null);
+  }
+
   async function saveEdit() {
     if (!project || !editTarget) return;
     const trimmedTitle = editTitle.trim();
@@ -652,7 +659,7 @@ export function FeaturesContent() {
       {/* Edit Feature Dialog */}
       <Dialog
         open={!!editTarget}
-        onOpenChange={(open) => !open && setEditTarget(null)}
+        onOpenChange={(open) => { if (!open) closeEditDialog(); }}
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -692,7 +699,7 @@ export function FeaturesContent() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setEditTarget(null)}
+              onClick={closeEditDialog}
               disabled={isSaving}
             >
               Cancel

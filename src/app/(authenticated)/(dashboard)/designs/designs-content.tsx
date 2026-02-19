@@ -42,12 +42,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { UpgradeModal } from "@/components/features/upgrade-modal";
+import { HtmlPreview } from "@/components/features/html-preview";
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 
 interface DesignItem {
   id: string;
   name: string;
+  html: string | null;
   thumbnail: string | null;
   isStandalone: boolean;
   projectId: string | null;
@@ -508,6 +510,10 @@ function DesignGridCard({
             fill
             className="object-cover"
           />
+        </div>
+      ) : design.html && design.html.length > 0 ? (
+        <div className="aspect-[16/10] w-full overflow-hidden">
+          <HtmlPreview html={design.html} />
         </div>
       ) : (
         <div className="flex aspect-[16/10] w-full items-center justify-center bg-muted/50">

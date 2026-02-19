@@ -52,7 +52,7 @@ interface UsageData {
   };
   usage: {
     designGenerations: number;
-    aiGenerations: number;
+    projectTokensUsed: number;
     projectsCreated: number;
     designsSaved: number;
   };
@@ -60,7 +60,7 @@ interface UsageData {
     maxProjects: number;
     maxDesigns: number;
     maxDesignGenerationsPerDay: number;
-    maxAiGenerationsPerMonth: number;
+    maxProjectTokensPerMonth: number;
   };
 }
 
@@ -83,6 +83,14 @@ const PLAN_PRICES: Record<string, string> = {
 function formatLimit(value: number): string {
   if (value === Infinity || value >= 999_999) return "Unlimited";
   return value.toLocaleString();
+}
+
+function formatTokens(tokens: number): string {
+  if (tokens >= 1_000_000)
+    return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1)}M`;
+  if (tokens >= 1_000)
+    return `${(tokens / 1_000).toFixed(tokens % 1_000 === 0 ? 0 : 1)}K`;
+  return String(tokens);
 }
 
 function usagePercent(used: number, limit: number): number {
@@ -356,14 +364,14 @@ export function BillingContent() {
             <CardContent className="space-y-5">
               {/* Projects */}
               <UsageRow
-                label="Projects Created"
+                label="Projects"
                 used={currentUsage.projectsCreated}
                 limit={limits.maxProjects}
               />
 
               {/* Designs */}
               <UsageRow
-                label="Designs Saved"
+                label="Designs"
                 used={currentUsage.designsSaved}
                 limit={limits.maxDesigns}
               />
@@ -375,11 +383,12 @@ export function BillingContent() {
                 limit={limits.maxDesignGenerationsPerDay}
               />
 
-              {/* AI Generations */}
+              {/* Project AI token usage: features, flows, pages, build */}
               <UsageRow
-                label="AI Generations"
-                used={currentUsage.aiGenerations}
-                limit={limits.maxAiGenerationsPerMonth}
+                label="Project Tokens"
+                used={currentUsage.projectTokensUsed}
+                limit={limits.maxProjectTokensPerMonth}
+                formatValue={formatTokens}
               />
             </CardContent>
           </Card>
@@ -634,23 +643,26 @@ function UsageRow({
   label,
   used,
   limit,
+  formatValue,
 }: {
   label: string;
   used: number;
   limit: number;
+  formatValue?: (n: number) => string;
 }) {
   const percent = usagePercent(used, limit);
   const isUnlimited = limit === Infinity || limit >= 999_999;
   const isOverLimit = !isUnlimited && limit > 0 && used >= limit;
+  const fmt = formatValue ?? ((n: number) => n.toLocaleString());
 
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between text-sm">
         <span className="text-muted-foreground">{label}</span>
         <span className={isOverLimit ? "font-medium text-destructive" : "font-medium"}>
-          {used.toLocaleString()}
+          {fmt(used)}
           {!isUnlimited && (
-            <span className="text-muted-foreground"> / {formatLimit(limit)}</span>
+            <span className="text-muted-foreground"> / {formatValue ? formatValue(limit) : formatLimit(limit)}</span>
           )}
           {isUnlimited && (
             <span className="ml-1 text-xs text-muted-foreground">

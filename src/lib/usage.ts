@@ -16,7 +16,6 @@ export type UsageAction = "ai_generation" | "design_generation";
 
 export type UsageField =
   | "designGenerations"
-  | "aiGenerations"
   | "projectsCreated"
   | "designsSaved";
 
@@ -49,8 +48,8 @@ export async function checkUsage(
   });
 
   if (action === "ai_generation") {
-    const limit = limits.maxAiGenerationsPerMonth;
-    const current = currentUsage?.aiGenerations ?? 0;
+    const limit = limits.maxProjectTokensPerMonth;
+    const current = currentUsage?.projectTokensUsed ?? 0;
 
     if (limit === Infinity) {
       return { allowed: true, limit, current, message: "" };
@@ -71,9 +70,9 @@ export async function checkUsage(
         allowed: false,
         limit,
         current,
-        message: `You've reached your monthly limit of ${limit} AI generations. ${
+        message: `You've reached your monthly project token limit (${formatTokens(limit)}). ${
           plan === "studio"
-            ? "Upgrade to Pro for 200/month or Founding for unlimited."
+            ? "Upgrade to Pro for more tokens."
             : "Please wait until next month or upgrade your plan."
         }`,
       };
@@ -109,6 +108,36 @@ export async function checkUsage(
   }
 
   return { allowed: true, limit, current, message: "" };
+}
+
+/** Format token count for display (e.g. 100000 → "100K") */
+export function formatTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1)}M`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(tokens % 1_000 === 0 ? 0 : 1)}K`;
+  return String(tokens);
+}
+
+/** Increment project token usage by a specific amount. */
+export async function incrementTokenUsage(
+  userId: string,
+  tokens: number,
+): Promise<void> {
+  if (tokens <= 0) return;
+  const period = getCurrentPeriod();
+
+  await db
+    .insert(usage)
+    .values({
+      userId,
+      period,
+      projectTokensUsed: tokens,
+    })
+    .onConflictDoUpdate({
+      target: [usage.userId, usage.period],
+      set: {
+        projectTokensUsed: sql`${usage.projectTokensUsed} + ${tokens}`,
+      },
+    });
 }
 
 export async function incrementUsage(

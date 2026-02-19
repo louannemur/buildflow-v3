@@ -45,6 +45,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { UpgradeModal } from "@/components/features/upgrade-modal";
+import { HtmlPreview } from "@/components/features/html-preview";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { canCreateProject, type Plan } from "@/lib/plan-limits";
 import { cn } from "@/lib/utils";
@@ -56,6 +57,7 @@ interface ProjectItem {
   name: string;
   description: string | null;
   thumbnail: string | null;
+  previewHtml: string | null;
   currentStep: string;
   status: string;
   updatedAt: string;
@@ -495,6 +497,10 @@ function ProjectGridCard({
             fill
             className="object-cover"
           />
+        </div>
+      ) : project.previewHtml ? (
+        <div className="aspect-[16/10] w-full overflow-hidden">
+          <HtmlPreview html={project.previewHtml} />
         </div>
       ) : (
         <div className="flex aspect-[16/10] w-full items-center justify-center bg-muted/50">

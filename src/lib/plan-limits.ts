@@ -5,7 +5,7 @@ export interface PlanLimits {
   maxDesigns: number;
   maxPagesPerProject: number;
   maxDesignGenerationsPerDay: number;
-  maxAiGenerationsPerMonth: number;
+  maxProjectTokensPerMonth: number;
   canBuild: boolean;
   canEditCode: boolean;
   canPublish: boolean;
@@ -17,7 +17,7 @@ const PLAN_LIMITS: Record<Plan, PlanLimits> = {
     maxDesigns: 3,
     maxPagesPerProject: 0,
     maxDesignGenerationsPerDay: 3,
-    maxAiGenerationsPerMonth: 0,
+    maxProjectTokensPerMonth: 0,
     canBuild: false,
     canEditCode: false,
     canPublish: false,
@@ -27,7 +27,7 @@ const PLAN_LIMITS: Record<Plan, PlanLimits> = {
     maxDesigns: Infinity,
     maxPagesPerProject: 5,
     maxDesignGenerationsPerDay: 30,
-    maxAiGenerationsPerMonth: 10,
+    maxProjectTokensPerMonth: 100_000,
     canBuild: false,
     canEditCode: true,
     canPublish: false,
@@ -37,7 +37,7 @@ const PLAN_LIMITS: Record<Plan, PlanLimits> = {
     maxDesigns: Infinity,
     maxPagesPerProject: Infinity,
     maxDesignGenerationsPerDay: Infinity,
-    maxAiGenerationsPerMonth: 200,
+    maxProjectTokensPerMonth: 2_000_000,
     canBuild: true,
     canEditCode: true,
     canPublish: true,
@@ -47,7 +47,7 @@ const PLAN_LIMITS: Record<Plan, PlanLimits> = {
     maxDesigns: Infinity,
     maxPagesPerProject: Infinity,
     maxDesignGenerationsPerDay: Infinity,
-    maxAiGenerationsPerMonth: 200,
+    maxProjectTokensPerMonth: 2_000_000,
     canBuild: true,
     canEditCode: true,
     canPublish: true,

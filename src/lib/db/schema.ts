@@ -168,6 +168,7 @@ export const usage = pgTable(
     period: text("period").notNull(), // "2026-02"
     designGenerations: integer("design_generations").notNull().default(0),
     aiGenerations: integer("ai_generations").notNull().default(0),
+    projectTokensUsed: integer("project_tokens_used").notNull().default(0),
     projectsCreated: integer("projects_created").notNull().default(0),
     designsSaved: integer("designs_saved").notNull().default(0),
     dailyDesignDate: text("daily_design_date"),

@@ -278,6 +278,49 @@ export function HomeContent() {
       setMode("chat");
     }
 
+    // ── Detect action phrases and trigger actions directly ──
+    const lower = message.toLowerCase();
+    const isBuildAction = /^(start building|build it|let'?s build|build everything|create the project|create it|let'?s go|make it|build this)$/i.test(lower)
+      || /^(start building|build it|let'?s build|build everything|create the project|create it|let'?s go|make it|build this)[.!]?$/i.test(lower);
+    const isDesignAction = /^(start designing|design it|let'?s design|create the design|design this)[.!]?$/i.test(lower);
+
+    if (isBuildAction || isDesignAction) {
+      const lastAssistant = [...store.messages].reverse().find((m) => m.role === "assistant");
+      if (lastAssistant) {
+        if ((isBuildAction && lastAssistant.intent === "new_project") || (isDesignAction && lastAssistant.intent === "new_project")) {
+          const projectName = lastAssistant.projectName || "your project";
+          store.addMessage({
+            id: `msg-${Date.now()}-status`,
+            role: "assistant",
+            content: `Setting up **${projectName}**. This will just take a moment...`,
+            intent: "new_project",
+          });
+          store.setProcessing(true);
+          const history = store.messages.map((m) => ({ role: m.role, content: m.content }));
+          await createProject(
+            lastAssistant.projectName || "Untitled Project",
+            lastAssistant.projectDescription,
+            history,
+          );
+          store.setProcessing(false);
+          return;
+        }
+        if (isDesignAction && lastAssistant.intent === "new_design") {
+          const designName = lastAssistant.projectName || "your design";
+          store.addMessage({
+            id: `msg-${Date.now()}-status`,
+            role: "assistant",
+            content: `Creating **${designName}**. One moment...`,
+            intent: "new_design",
+          });
+          store.setProcessing(true);
+          await createDesign(lastAssistant.projectName || "Untitled Design");
+          store.setProcessing(false);
+          return;
+        }
+      }
+    }
+
     store.setProcessing(true);
 
     try {
@@ -313,6 +356,7 @@ export function HomeContent() {
         intent: string,
         suggestions: string[],
         actionName?: string,
+        navPayload?: string | null,
       ): GlobalSuggestion[] {
         const chips: GlobalSuggestion[] = suggestions.map((s) => ({
           label: s,
@@ -320,7 +364,9 @@ export function HomeContent() {
           text: s,
         }));
 
-        if (hasEnoughContext) {
+        if (intent === "manage_project" && navPayload) {
+          chips.push({ label: "Go to project", action: "go_to_project", text: navPayload });
+        } else if (hasEnoughContext) {
           if (intent === "new_project") {
             chips.push({ label: "Build everything", action: "create_project", text: actionName });
           } else if (intent === "new_design") {
@@ -332,6 +378,20 @@ export function HomeContent() {
       }
 
       switch (data.intent) {
+        case "manage_project": {
+          store.addMessage({
+            id: `msg-${Date.now()}-ast`,
+            role: "assistant",
+            content: data.message || `Let me take you to **${data.name || "your project"}**!`,
+            intent: "manage_project",
+            projectName: data.name,
+          });
+          const navPayload = data.projectId
+            ? JSON.stringify({ projectId: data.projectId, step: data.step ?? null, pageId: data.pageId ?? null, userMessage: message })
+            : null;
+          store.setSuggestions(buildSuggestions("manage_project", aiSuggestions, data.name, navPayload));
+          break;
+        }
         case "new_project": {
           store.addMessage({
             id: `msg-${Date.now()}-ast`,
@@ -396,18 +456,48 @@ export function HomeContent() {
 
   async function handleSuggestionClick(suggestion: GlobalSuggestion) {
     switch (suggestion.action) {
+      case "go_to_project": {
+        if (suggestion.text) {
+          try {
+            const nav = JSON.parse(suggestion.text) as { projectId: string; step?: string | null; pageId?: string | null; userMessage?: string };
+            let target = `/project/${nav.projectId}`;
+            if (nav.step) {
+              target += `/${nav.step}`;
+              if (nav.step === "designs" && nav.pageId) {
+                target += `/${nav.pageId}`;
+                // Store the user's instructions so the editor can start working immediately
+                if (nav.userMessage) {
+                  useGlobalChatStore.getState().setPendingEditorPrompt(nav.userMessage);
+                }
+              }
+            }
+            router.push(target);
+          } catch {
+            router.push(`/project/${suggestion.text}`);
+          }
+        }
+        break;
+      }
       case "create_project": {
         const store = useGlobalChatStore.getState();
         const lastProjectMsg = [...store.messages]
           .reverse()
           .find((m) => m.role === "assistant" && m.intent === "new_project");
+        const name = lastProjectMsg?.projectName || suggestion.text || "Untitled Project";
+        store.addMessage({
+          id: `msg-${Date.now()}-status`,
+          role: "assistant",
+          content: `Setting up **${name}**. This will just take a moment...`,
+          intent: "new_project",
+        });
+        store.setSuggestions([]);
         const history = store.messages.map((m) => ({
           role: m.role,
           content: m.content,
         }));
         store.setProcessing(true);
         await createProject(
-          lastProjectMsg?.projectName || suggestion.text || "Untitled Project",
+          name,
           lastProjectMsg?.projectDescription,
           history,
         );
@@ -419,10 +509,16 @@ export function HomeContent() {
         const lastDesignMsg = [...store.messages]
           .reverse()
           .find((m) => m.role === "assistant" && m.intent === "new_design");
+        const name = lastDesignMsg?.projectName || suggestion.text || "Untitled Design";
+        store.addMessage({
+          id: `msg-${Date.now()}-status`,
+          role: "assistant",
+          content: `Creating **${name}**. One moment...`,
+          intent: "new_design",
+        });
+        store.setSuggestions([]);
         store.setProcessing(true);
-        await createDesign(
-          lastDesignMsg?.projectName || suggestion.text || "Untitled Design",
-        );
+        await createDesign(name);
         store.setProcessing(false);
         break;
       }

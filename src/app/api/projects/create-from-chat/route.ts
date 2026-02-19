@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { projects, features, userFlows, pages } from "@/lib/db/schema";
 import { createFromChatSchema } from "@/lib/validators/project";
 import { getPlanLimits } from "@/lib/plan-limits";
-import { getUserPlan, checkUsage, incrementUsage } from "@/lib/usage";
+import { getUserPlan, checkUsage, incrementUsage, incrementTokenUsage } from "@/lib/usage";
 
 // ─── System prompts (same as individual generate endpoints) ──────────────────
 
@@ -124,12 +124,9 @@ export async function POST(req: Request) {
       );
     }
 
-    // Check if user has enough AI generations (need 3)
+    // Check if user has enough token budget
     const usageCheck = await checkUsage(userId, plan, "ai_generation");
-    const hasAiCredits =
-      usageCheck.allowed &&
-      (usageCheck.limit === Infinity ||
-        usageCheck.limit - usageCheck.current >= 3);
+    const hasAiCredits = usageCheck.allowed;
 
     // ─── Create the project ──────────────────────────────────────────────
 
@@ -181,6 +178,9 @@ export async function POST(req: Request) {
 
       if (featuresArr) {
         generatedFeatures = featuresArr;
+        const featuresTokens =
+          (featuresRes.usage?.input_tokens ?? 0) +
+          (featuresRes.usage?.output_tokens ?? 0);
         await Promise.all([
           db.insert(features).values(
             generatedFeatures.map((f, i) => ({
@@ -190,7 +190,7 @@ export async function POST(req: Request) {
               order: i,
             })),
           ),
-          incrementUsage(userId, "aiGenerations"),
+          incrementTokenUsage(userId, featuresTokens),
         ]);
       }
     } catch {
@@ -230,7 +230,13 @@ export async function POST(req: Request) {
         });
         const text =
           flowsRes.content[0].type === "text" ? flowsRes.content[0].text : "";
-        return parseJsonArray(text) as FlowItem[] | null;
+        const tokens =
+          (flowsRes.usage?.input_tokens ?? 0) +
+          (flowsRes.usage?.output_tokens ?? 0);
+        return {
+          items: parseJsonArray(text) as FlowItem[] | null,
+          tokens,
+        };
       })(),
       // Pages
       (async () => {
@@ -247,7 +253,13 @@ export async function POST(req: Request) {
         });
         const text =
           pagesRes.content[0].type === "text" ? pagesRes.content[0].text : "";
-        return parseJsonArray(text) as PageItem[] | null;
+        const tokens =
+          (pagesRes.usage?.input_tokens ?? 0) +
+          (pagesRes.usage?.output_tokens ?? 0);
+        return {
+          items: parseJsonArray(text) as PageItem[] | null,
+          tokens,
+        };
       })(),
     ]);
 
@@ -255,24 +267,24 @@ export async function POST(req: Request) {
 
     const dbOps: Promise<unknown>[] = [];
 
-    if (flowsResult.status === "fulfilled" && flowsResult.value) {
+    if (flowsResult.status === "fulfilled" && flowsResult.value.items) {
       dbOps.push(
         db.insert(userFlows).values(
-          flowsResult.value.map((f, i) => ({
+          flowsResult.value.items.map((f, i) => ({
             projectId: project.id,
             title: f.title,
             steps: f.steps,
             order: i,
           })),
         ),
-        incrementUsage(userId, "aiGenerations"),
+        incrementTokenUsage(userId, flowsResult.value.tokens),
       );
     }
 
-    if (pagesResult.status === "fulfilled" && pagesResult.value) {
+    if (pagesResult.status === "fulfilled" && pagesResult.value.items) {
       dbOps.push(
         db.insert(pages).values(
-          pagesResult.value.map((p, i) => ({
+          pagesResult.value.items.map((p, i) => ({
             projectId: project.id,
             title: p.title,
             description: p.description,
@@ -280,7 +292,7 @@ export async function POST(req: Request) {
             order: i,
           })),
         ),
-        incrementUsage(userId, "aiGenerations"),
+        incrementTokenUsage(userId, pagesResult.value.tokens),
       );
     }
 

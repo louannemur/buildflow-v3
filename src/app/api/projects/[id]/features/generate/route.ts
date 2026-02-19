@@ -4,7 +4,7 @@ import { auth } from "@/lib/auth";
 import { anthropic } from "@/lib/ai";
 import { db } from "@/lib/db";
 import { features, projects } from "@/lib/db/schema";
-import { getUserPlan, checkUsage, incrementUsage } from "@/lib/usage";
+import { getUserPlan, checkUsage, incrementTokenUsage } from "@/lib/usage";
 import { createSSEResponse } from "@/lib/sse";
 
 const SYSTEM_PROMPT = `You are a product strategist. Given the project name and description, generate 6-10 key features for an MVP.
@@ -77,6 +77,12 @@ export async function POST(
         }
       }
 
+      // Get token usage from the completed stream
+      const finalMessage = await stream.finalMessage();
+      const tokensUsed =
+        (finalMessage.usage?.input_tokens ?? 0) +
+        (finalMessage.usage?.output_tokens ?? 0);
+
       // Parse the JSON array from accumulated text
       const jsonMatch = accumulated.match(/\[[\s\S]*\]/);
       if (!jsonMatch) {
@@ -116,8 +122,8 @@ export async function POST(
         )
         .returning();
 
-      // Increment AI usage
-      await incrementUsage(userId, "aiGenerations");
+      // Increment token usage
+      await incrementTokenUsage(userId, tokensUsed);
 
       // Emit each feature individually for animated reveal
       for (const feature of newFeatures) {

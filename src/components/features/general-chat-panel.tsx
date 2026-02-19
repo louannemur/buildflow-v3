@@ -355,6 +355,74 @@ export function GeneralChatPanel() {
         if (plainInputRef.current) plainInputRef.current.value = "";
       }
 
+      // ── Detect action phrases and trigger actions directly ──
+      const lower = message.toLowerCase().replace(/[.!?]+$/, "");
+      const isBuildAction = /^(start building|build it|let'?s build|build everything|create the project|create it|let'?s go|make it|build this)$/.test(lower);
+      const isDesignAction = /^(start designing|design it|let'?s design|create the design|design this)$/.test(lower);
+
+      if (isBuildAction || isDesignAction) {
+        const lastAssistant = [...store.messages].reverse().find((m) => m.role === "assistant");
+        if (lastAssistant) {
+          if ((isBuildAction && lastAssistant.intent === "new_project") || (isDesignAction && lastAssistant.intent === "new_project")) {
+            const projectName = lastAssistant.projectName || "your project";
+            store.addMessage({
+              id: `msg-${Date.now()}-status`,
+              role: "assistant",
+              content: `Setting up **${projectName}**. This will just take a moment...`,
+              intent: "new_project",
+            });
+            store.setProcessing(true);
+            try {
+              const history = store.messages.map((m) => ({ role: m.role, content: m.content }));
+              const name = lastAssistant.projectName || "Untitled Project";
+              const description = lastAssistant.projectDescription;
+              const res = await fetch("/api/projects/create-from-chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name, description, history }),
+              });
+              if (res.ok) {
+                const project = await res.json();
+                store.setOpen(false);
+                router.push(`/project/${project.id}`);
+              } else {
+                toast.error("Failed to create project.");
+              }
+            } finally {
+              store.setProcessing(false);
+            }
+            return;
+          }
+          if (isDesignAction && lastAssistant.intent === "new_design") {
+            const designName = lastAssistant.projectName || "your design";
+            store.addMessage({
+              id: `msg-${Date.now()}-status`,
+              role: "assistant",
+              content: `Creating **${designName}**. One moment...`,
+              intent: "new_design",
+            });
+            store.setProcessing(true);
+            try {
+              const res = await fetch("/api/designs", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: lastAssistant.projectName || "Untitled Design" }),
+              });
+              if (res.ok) {
+                const design = await res.json();
+                store.setOpen(false);
+                router.push(`/design/${design.id}?autoGenerate=true`);
+              } else {
+                toast.error("Failed to create design.");
+              }
+            } finally {
+              store.setProcessing(false);
+            }
+            return;
+          }
+        }
+      }
+
       store.setProcessing(true);
 
       try {
@@ -488,13 +556,20 @@ export function GeneralChatPanel() {
           intent: string,
           sug: string[],
           actionName?: string,
+          navPayload?: string | null,
         ): GlobalSuggestion[] {
           const chips: GlobalSuggestion[] = sug.map((s) => ({
             label: s,
             action: "send_message" as const,
             text: s,
           }));
-          if (hasEnoughContext) {
+          if (intent === "manage_project" && navPayload) {
+            chips.push({
+              label: "Go to project",
+              action: "go_to_project",
+              text: navPayload,
+            });
+          } else if (hasEnoughContext) {
             if (intent === "new_project") {
               chips.push({
                 label: "Build everything",
@@ -513,6 +588,24 @@ export function GeneralChatPanel() {
         }
 
         switch (data.intent) {
+          case "manage_project": {
+            store.addMessage({
+              id: `msg-${Date.now()}-ast`,
+              role: "assistant",
+              content:
+                data.message ||
+                `Let me take you to **${data.name || "your project"}**!`,
+              intent: "manage_project",
+              projectName: data.name,
+            });
+            const navPayload = data.projectId
+              ? JSON.stringify({ projectId: data.projectId, step: data.step ?? null, pageId: data.pageId ?? null, userMessage: message })
+              : null;
+            store.setSuggestions(
+              buildSuggestions("manage_project", aiSuggestions, data.name, navPayload),
+            );
+            break;
+          }
           case "new_project": {
             store.addMessage({
               id: `msg-${Date.now()}-ast`,
@@ -598,6 +691,28 @@ export function GeneralChatPanel() {
       const store = useGlobalChatStore.getState();
 
       switch (suggestion.action) {
+        case "go_to_project": {
+          if (suggestion.text) {
+            store.setOpen(false);
+            try {
+              const nav = JSON.parse(suggestion.text) as { projectId: string; step?: string | null; pageId?: string | null; userMessage?: string };
+              let target = `/project/${nav.projectId}`;
+              if (nav.step) {
+                target += `/${nav.step}`;
+                if (nav.step === "designs" && nav.pageId) {
+                  target += `/${nav.pageId}`;
+                  if (nav.userMessage) {
+                    store.setPendingEditorPrompt(nav.userMessage);
+                  }
+                }
+              }
+              router.push(target);
+            } catch {
+              router.push(`/project/${suggestion.text}`);
+            }
+          }
+          break;
+        }
         case "create_project": {
           const lastProjectMsg = [...store.messages]
             .reverse()
@@ -606,16 +721,23 @@ export function GeneralChatPanel() {
             role: m.role,
             content: m.content,
           }));
+          const name =
+            lastProjectMsg?.projectName ||
+            suggestion.text ||
+            "Untitled Project";
+          store.addMessage({
+            id: `msg-${Date.now()}-status`,
+            role: "assistant",
+            content: `Setting up **${name}**. This will just take a moment...`,
+            intent: "new_project",
+          });
+          store.setSuggestions([]);
           store.setProcessing(true);
           try {
             const hasHistory = history.length > 0;
             const endpoint = hasHistory
               ? "/api/projects/create-from-chat"
               : "/api/projects";
-            const name =
-              lastProjectMsg?.projectName ||
-              suggestion.text ||
-              "Untitled Project";
             const description = lastProjectMsg?.projectDescription;
 
             const res = await fetch(endpoint, {
@@ -649,17 +771,23 @@ export function GeneralChatPanel() {
           const lastDesignMsg = [...store.messages]
             .reverse()
             .find((m) => m.role === "assistant" && m.intent === "new_design");
+          const name =
+            lastDesignMsg?.projectName ||
+            suggestion.text ||
+            "Untitled Design";
+          store.addMessage({
+            id: `msg-${Date.now()}-status`,
+            role: "assistant",
+            content: `Creating **${name}**. One moment...`,
+            intent: "new_design",
+          });
+          store.setSuggestions([]);
           store.setProcessing(true);
           try {
             const res = await fetch("/api/designs", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                name:
-                  lastDesignMsg?.projectName ||
-                  suggestion.text ||
-                  "Untitled Design",
-              }),
+              body: JSON.stringify({ name }),
             });
 
             if (res.status === 403) {
@@ -905,7 +1033,7 @@ export function GeneralChatPanel() {
                       className={`mb-3 ${msg.role === "user" ? "text-right" : "text-left"}`}
                     >
                       <div
-                        className={`inline-block max-w-[85%] rounded-xl px-3 py-2 text-sm leading-relaxed ${
+                        className={`inline-block max-w-[85%] rounded-xl px-3 py-2 text-left text-sm leading-relaxed ${
                           msg.role === "user"
                             ? "bg-primary text-primary-foreground"
                             : "bg-muted text-foreground"
@@ -1002,7 +1130,8 @@ export function GeneralChatPanel() {
                       key={s.label}
                       className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                         s.action === "create_project" ||
-                        s.action === "create_design"
+                        s.action === "create_design" ||
+                        s.action === "go_to_project"
                           ? "bg-primary text-primary-foreground hover:bg-primary/90"
                           : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
                       }`}

@@ -269,6 +269,18 @@ export function PagesContent() {
     setDetailContents(page.contents ? [...page.contents] : []);
   }
 
+  function closeDetailDialog() {
+    if (detailPage) {
+      const titleChanged = detailTitle !== detailPage.title;
+      const descChanged = detailDesc !== (detailPage.description ?? "");
+      const contentsChanged = JSON.stringify(detailContents) !== JSON.stringify(detailPage.contents ?? []);
+      if (titleChanged || descChanged || contentsChanged) {
+        if (!window.confirm("You have unsaved changes. Discard them?")) return;
+      }
+    }
+    setDetailPage(null);
+  }
+
   function addContentItem() {
     setDetailContents((prev) => [
       ...prev,
@@ -547,7 +559,7 @@ export function PagesContent() {
       {/* Page Detail / Edit Dialog */}
       <Dialog
         open={!!detailPage}
-        onOpenChange={(open) => !open && setDetailPage(null)}
+        onOpenChange={(open) => { if (!open) closeDetailDialog(); }}
       >
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
@@ -640,7 +652,7 @@ export function PagesContent() {
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => setDetailPage(null)}
+              onClick={closeDetailDialog}
               disabled={isSavingDetail}
             >
               Cancel

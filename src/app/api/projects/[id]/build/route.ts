@@ -19,7 +19,7 @@ import {
   buildOutputs,
   type BuildFile,
 } from "@/lib/db/schema";
-import { getUserPlan, checkUsage, incrementUsage } from "@/lib/usage";
+import { getUserPlan, checkUsage, incrementTokenUsage } from "@/lib/usage";
 import { z } from "zod";
 
 const execAsync = promisify(exec);
@@ -113,7 +113,7 @@ function buildSystemPrompt(opts: {
   styling: string;
   includeTypeScript: boolean;
   features: { title: string; description: string }[];
-  flows: { title: string; steps: { title: string; description: string }[] }[];
+  flows: { title: string; steps: { title: string; description: string; type: string }[] }[];
   pages: {
     title: string;
     description: string | null;
@@ -144,7 +144,7 @@ function buildSystemPrompt(opts: {
   const tsLabel = opts.includeTypeScript ? "Yes" : "No";
 
   const parts: string[] = [
-    `You are an expert full-stack developer. Generate a complete, production-ready ${frameworkLabel} project based on the following specification.
+    `You are an expert full-stack developer who builds functional, interactive web applications. Generate a complete, production-ready ${frameworkLabel} project based on the following specification. This is NOT a visual mockup — every form must submit, every button must work, every list must render real data, and every user flow must be completable end-to-end.
 
 PROJECT: ${opts.projectName}${opts.projectDescription ? ` — ${opts.projectDescription}` : ""}`,
   ];
@@ -152,17 +152,26 @@ PROJECT: ${opts.projectName}${opts.projectDescription ? ` — ${opts.projectDesc
   // Features
   if (opts.features.length > 0) {
     parts.push(
-      `\nFEATURES:\n${opts.features.map((f) => `- ${f.title}: ${f.description}`).join("\n")}`,
+      `\nFEATURES (each feature MUST be fully functional — not just visual):\n${opts.features.map((f) => `- ${f.title}: ${f.description}`).join("\n")}\n\nFor EVERY feature listed above:\n- Identify what data it needs (create types/interfaces for it)\n- Identify what user actions it requires (forms, buttons, toggles)\n- Implement the complete data flow: user action → state update → UI feedback\n- If the feature involves a list of items, implement CRUD (create, read, update, delete)`,
     );
   }
 
-  // Flows
+  // Flows — with step types for implementation guidance
   if (opts.flows.length > 0) {
     parts.push(
-      `\nUSER FLOWS:\n${opts.flows
+      `\nUSER FLOWS (implement each flow as a working end-to-end interaction):
+
+Step type legend:
+- [input] = Form fields, text inputs, selects, file uploads. MUST have: onChange handlers, validation, error messages, submit handler.
+- [action] = Button clicks, toggles, swipes, drag-drop. MUST have: onClick/event handlers with real logic, loading states during async operations, success/error feedback.
+- [decision] = Conditional branches (if/else in UI). MUST have: conditional rendering based on state, different UI paths based on user choices or data state.
+- [navigation] = Page transitions, tab switches, modal opens. MUST have: working router links/navigation calls, proper URL updates.
+- [display] = Showing data, results, confirmations. MUST have: data fetched from the data layer, loading skeletons while fetching, empty states when no data exists.
+
+${opts.flows
         .map(
           (f) =>
-            `Flow: ${f.title}\n${f.steps.map((s, i) => `  ${i + 1}. ${s.title}: ${s.description}`).join("\n")}`,
+            `Flow: ${f.title}\n${f.steps.map((s, i) => `  ${i + 1}. [${s.type}] ${s.title}: ${s.description}`).join("\n")}`,
         )
         .join("\n\n")}`,
     );
@@ -177,9 +186,9 @@ PROJECT: ${opts.projectName}${opts.projectDescription ? ` — ${opts.projectDesc
 
     for (const page of opts.pages) {
       let pageStr = `\nPAGE: ${page.title}`;
-      if (page.description) pageStr += `\nDescription: ${page.description}`;
+      if (page.description) pageStr += `\nPurpose: ${page.description}`;
       if (page.contents && page.contents.length > 0) {
-        pageStr += `\nContent sections:\n${page.contents.map((c) => `  - ${c.name}: ${c.description}`).join("\n")}`;
+        pageStr += `\nSections (implement each as a functional component):\n${page.contents.map((c) => `  - ${c.name}: ${c.description}`).join("\n")}`;
       }
       parts.push(pageStr);
     }
@@ -187,7 +196,7 @@ PROJECT: ${opts.projectName}${opts.projectDescription ? ` — ${opts.projectDesc
 
   if (pagesWithDesigns.length > 0) {
     parts.push(
-      `\nDESIGNS:\nThe following HTML designs should be converted into ${frameworkLabel} components while preserving the visual design exactly:`,
+      `\nDESIGNS:\nThe following HTML designs should be converted into ${frameworkLabel} components while preserving the visual design exactly. IMPORTANT: The designs are visual mockups with hardcoded content. You MUST replace all hardcoded data with dynamic data from the data layer, add real event handlers to all interactive elements (buttons, forms, links), and connect everything to state management. The visual design is the spec for HOW it should look — the features and flows above are the spec for HOW it should work.`,
     );
 
     for (const page of pagesWithDesigns) {
@@ -208,6 +217,65 @@ PROJECT: ${opts.projectName}${opts.projectDescription ? ` — ${opts.projectDesc
     );
   }
 
+  // Data architecture
+  const isReactFramework = opts.framework === "nextjs" || opts.framework === "vite_react";
+  parts.push(`
+DATA ARCHITECTURE (required — do not skip):
+
+1. TYPES: Create a types file (src/types/index.${opts.includeTypeScript ? "ts" : "js"}) with ${opts.includeTypeScript ? "TypeScript interfaces" : "JSDoc type definitions"} for every entity in the app. Derive these from the features and page content sections above. For example, if there's a "Product Catalog" feature, define a Product type with all fields visible in the designs (id, name, price, description, image, etc).
+
+2. MOCK DATA: Create a data file (src/data/mock-data.${opts.includeTypeScript ? "ts" : "js"}) with realistic seed data for every type. Use 5-15 items per collection with contextually appropriate content (real-sounding names, plausible descriptions, varied values). This file is the single source of truth — components must import from here, never hardcode data inline.
+
+3. DATA SERVICE: Create a data service (src/lib/data-service.${opts.includeTypeScript ? "ts" : "js"}) that provides CRUD operations over the mock data using localStorage for persistence:
+   - On first load, check localStorage — if empty, seed from mock data
+   - All reads come from localStorage (JSON.parse)
+   - All writes update localStorage (JSON.stringify) and return updated data
+   - Wrap operations in async functions with a small delay (await new Promise(r => setTimeout(r, 100))) so loading states are visible
+   - Export functions like: getItems(), getItemById(id), createItem(data), updateItem(id, data), deleteItem(id) for each entity
+
+4. STATE MANAGEMENT: ${isReactFramework ? "Use React Context + useReducer for global state (auth, current user, shopping cart, etc.). Create a providers wrapper component. For page-level state, use useState/useReducer directly." : "Use vanilla JS with localStorage for state persistence."}`);
+
+  // Functional requirements
+  parts.push(`
+FUNCTIONAL REQUIREMENTS (every point is mandatory):
+
+FORMS:
+- Every form visible in the designs MUST have: controlled inputs (value + onChange), client-side validation (required fields, email format, min length, etc.), a submit handler that calls the data service, visual feedback (loading spinner on submit button, then success toast or error message), and disabled submit button while submitting.
+- After successful form submission, either redirect to the relevant page or show a success message and reset the form.
+
+BUTTONS & ACTIONS:
+- Every button in the designs MUST have a real onClick handler — no button should be inert.
+- Destructive actions (delete, remove) should show a confirmation dialog before executing.
+- Action buttons should show loading state while processing.
+
+NAVIGATION:
+- ${opts.framework === "nextjs" ? "Use Next.js App Router with Link from 'next/link' for navigation and useRouter from 'next/navigation' for programmatic navigation." : opts.framework === "vite_react" ? "Use react-router-dom v7 with BrowserRouter, Routes, Route for routing and useNavigate for programmatic navigation." : "Use anchor tags with proper href attributes for multi-page navigation."}
+- All navigation links visible in the designs (navbar, sidebar, footer) must work and go to the correct page.
+- Implement active state styling for the current page in navigation menus.
+
+LISTS & DATA DISPLAY:
+- All lists, tables, grids, and cards MUST render data from the data service — NEVER hardcode items inline in components.
+- Include a loading skeleton/spinner while data is being fetched.
+- Include an empty state when a list has zero items (e.g. "No items yet. Create your first one.").
+- If the designs show search or filter controls, implement them — they should actually filter the displayed data.
+
+AUTHENTICATION (if any auth/login/signup pages exist in the project):
+- Implement login/signup forms that validate input and store auth state in localStorage.
+- Create an auth context that tracks: isAuthenticated, currentUser, login(), logout(), signup().
+- Protected pages should redirect to login if not authenticated.
+- After login, redirect to the main dashboard/home page. After logout, redirect to login.
+
+ERROR HANDLING:
+- Wrap data operations in try/catch. Show user-friendly error messages (toast or inline banner), never raw errors.
+
+LOADING STATES:
+- Every async operation (data fetch, form submit, delete) must show a loading indicator.
+- Use skeleton screens for initial page loads, spinners for action buttons.
+
+TOAST NOTIFICATIONS:
+- ${isReactFramework ? "Use the sonner package for toast notifications." : "Create a simple toast notification system."}
+- Show toasts for: successful form submissions, successful deletions, errors, and other user feedback.`);
+
   // Tech stack + framework-specific version guidance
   const nextjsRules = `
 - Use Next.js 15 (latest stable). In package.json: "next": "^15.1.0", "react": "^19.0.0", "react-dom": "^19.0.0"
@@ -219,11 +287,14 @@ PROJECT: ${opts.projectName}${opts.projectDescription ? ` — ${opts.projectDesc
 - Every component that uses hooks (useState, useEffect, etc.), event handlers (onClick, onChange, etc.), or browser APIs MUST have "use client" at the top
 - Do NOT import from "next/router" — use "next/navigation" instead (useRouter, usePathname, useSearchParams)
 - For images, use next/image with width and height props, OR use regular <img> tags
-- Do NOT use the experimental "appDir" option — App Router is the default in Next.js 15`;
+- Do NOT use the experimental "appDir" option — App Router is the default in Next.js 15
+- Create a root layout.tsx that wraps the app in necessary providers (auth context, toast container via Toaster from sonner)`;
 
   const viteRules = `
 - Use Vite 6 with React 19. In package.json: "vite": "^6.0.0", "react": "^19.0.0", "react-dom": "^19.0.0", "@vitejs/plugin-react": "^4.3.0"
-- Config file: vite.config.${opts.includeTypeScript ? "ts" : "js"}`;
+- Config file: vite.config.${opts.includeTypeScript ? "ts" : "js"}
+- Use react-router-dom v7 for routing. Wrap the app in BrowserRouter in main.${opts.includeTypeScript ? "tsx" : "jsx"}
+- Create a layout component that wraps routes in necessary providers (auth context, toast container)`;
 
   const frameworkRules =
     opts.framework === "nextjs"
@@ -251,11 +322,11 @@ TECH STACK:
 
 REQUIREMENTS:
 - Generate a complete project with proper file structure
-- Convert all HTML designs into proper ${frameworkLabel} components
-- Preserve the exact visual design from the HTML (colors, fonts, spacing, layout)
-- Create proper routing/navigation between pages
-- Include realistic placeholder data
-${opts.includeTypeScript ? "- Add proper TypeScript types for all components and data" : ""}
+- Convert all HTML designs into proper ${frameworkLabel} components — preserving exact visual design (colors, fonts, spacing, layout)
+- ALL interactive elements MUST be functional (see FUNCTIONAL REQUIREMENTS above)
+- ALL data MUST come from the data service layer (see DATA ARCHITECTURE above)
+- ALL user flows MUST be completable end-to-end (see USER FLOWS above)
+${opts.includeTypeScript ? "- Add proper TypeScript types for all components, data, and function parameters" : ""}
 - Include a README.md with setup instructions
 - Include package.json with all required dependencies and correct version numbers
 - The project MUST build successfully with "npm install && npm run build" — no errors allowed
@@ -273,6 +344,8 @@ DEPENDENCY VERSION RULES (React 19 compatibility):
 - class-variance-authority: use "^0.7.1"
 - tailwind-merge: use "^2.6.0"
 - zod: use "^3.24.0"
+- sonner: use "^2.0.0" or later
+- ${opts.framework === "vite_react" ? 'react-router-dom: use "^7.0.0"' : "Do NOT include react-router-dom for Next.js projects — use the built-in App Router"}
 - Do NOT use any package version that has peer dependency requirements for react@"^16" or react@"^17" or react@"^18" only
 - When in doubt, use the LATEST stable version of any package — never use old/outdated versions
 - Generate an .npmrc file with: legacy-peer-deps=true
@@ -449,6 +522,7 @@ export async function POST(
         steps: (f.steps ?? []).map((s) => ({
           title: s.title,
           description: s.description,
+          type: s.type ?? "action",
         })),
       })),
       pages: projectPages.map((p) => {
@@ -476,6 +550,7 @@ export async function POST(
       async start(controller) {
         let savedAsComplete = false;
         let savedFiles: BuildFile[] = [];
+        let totalTokensUsed = 0;
         try {
           const stream = anthropic.messages.stream({
             model: "claude-opus-4-6",
@@ -588,6 +663,9 @@ export async function POST(
           let wasTruncated = false;
           try {
             const finalMsg = await stream.finalMessage();
+            totalTokensUsed +=
+              (finalMsg.usage?.input_tokens ?? 0) +
+              (finalMsg.usage?.output_tokens ?? 0);
             // Check if the model hit max_tokens
             if (finalMsg.stop_reason === "max_tokens") {
               wasTruncated = true;
@@ -663,6 +741,10 @@ export async function POST(
                   },
                 ],
               });
+
+              totalTokensUsed +=
+                (contResponse.usage?.input_tokens ?? 0) +
+                (contResponse.usage?.output_tokens ?? 0);
 
               const contText: string =
                 contResponse.content[0].type === "text"
@@ -860,6 +942,10 @@ export async function POST(
                   ],
                 });
 
+                totalTokensUsed +=
+                  (fixResponse.usage?.input_tokens ?? 0) +
+                  (fixResponse.usage?.output_tokens ?? 0);
+
                 const fixText =
                   fixResponse.content[0].type === "text"
                     ? fixResponse.content[0].text
@@ -913,7 +999,7 @@ export async function POST(
           }
 
           try {
-            await incrementUsage(userId, "aiGenerations");
+            await incrementTokenUsage(userId, totalTokensUsed);
           } catch (usageErr) {
             console.error("Failed to increment usage:", usageErr);
             // Non-fatal — don't block the build result

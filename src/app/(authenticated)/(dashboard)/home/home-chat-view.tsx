@@ -1,6 +1,6 @@
 "use client";
 
-import type { RefObject } from "react";
+import { type RefObject, useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Send, Loader2, ArrowRight } from "lucide-react";
 import { NetworkGraph } from "@/components/features/network-graph";
@@ -53,6 +53,48 @@ function FormattedText({ text }: { text: string }) {
   );
 }
 
+/* ─── Typewriter text ───────────────────────────────────────────────────── */
+
+function TypewriterText({
+  text,
+  onComplete,
+}: {
+  text: string;
+  onComplete?: () => void;
+}) {
+  const [displayed, setDisplayed] = useState(0);
+  const onCompleteRef = useRef(onComplete);
+  useEffect(() => { onCompleteRef.current = onComplete; });
+
+  useEffect(() => {
+    if (displayed >= text.length) {
+      onCompleteRef.current?.();
+      return;
+    }
+
+    // Faster for longer messages, slower for short ones
+    const baseSpeed = text.length > 100 ? 8 : 15;
+    const timeout = setTimeout(() => {
+      // Type 1-3 chars at a time for natural feel
+      const step = text.length > 200 ? 3 : text.length > 80 ? 2 : 1;
+      setDisplayed((d) => Math.min(d + step, text.length));
+    }, baseSpeed);
+
+    return () => clearTimeout(timeout);
+  }, [displayed, text]);
+
+  const visible = text.slice(0, displayed);
+
+  return (
+    <>
+      <FormattedText text={visible} />
+      {displayed < text.length && (
+        <span className="ml-0.5 inline-block h-[1.1em] w-[2px] animate-pulse bg-foreground/60 align-text-bottom" />
+      )}
+    </>
+  );
+}
+
 /* ─── User message bubble ────────────────────────────────────────────────── */
 
 function UserMessage({
@@ -64,10 +106,10 @@ function UserMessage({
 }) {
   return (
     <div className="flex items-start justify-end gap-3">
-      <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-foreground px-4 py-3 text-sm text-background sm:max-w-[70%]">
+      <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-foreground px-4 py-3 text-left text-sm text-background sm:max-w-[70%]">
         {content}
       </div>
-      <Avatar className="mt-0.5 shrink-0">
+      <Avatar className="size-8 shrink-0">
         <AvatarImage src={user?.image ?? undefined} alt={user?.name ?? ""} />
         <AvatarFallback className="text-xs">
           {getInitials(user?.name)}
@@ -77,39 +119,53 @@ function UserMessage({
   );
 }
 
-/* ─── Assistant message bubble ───────────────────────────────────────────── */
+/* ─── Assistant message ──────────────────────────────────────────────────── */
 
-function AssistantMessage({ message }: { message: GlobalChatMessage }) {
+function AssistantMessage({
+  message,
+  animate,
+  onAnimationComplete,
+}: {
+  message: GlobalChatMessage;
+  animate: boolean;
+  onAnimationComplete?: () => void;
+}) {
   return (
     <div className="flex items-start gap-3">
-      <div className="mt-0.5 size-10 shrink-0">
+      <div className="size-8 shrink-0">
         <NetworkGraph />
       </div>
-      <div className="max-w-[90%] sm:max-w-[80%]">
-        <div className="text-sm text-foreground">
-          <FormattedText text={message.content} />
+      <div className="max-w-[90%] pt-[5px] sm:max-w-[80%]">
+        <div className="text-sm leading-relaxed text-foreground">
+          {animate ? (
+            <TypewriterText
+              text={message.content}
+              onComplete={onAnimationComplete}
+            />
+          ) : (
+            <FormattedText text={message.content} />
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-/* ─── Typing indicator ───────────────────────────────────────────────────── */
+/* ─── Waiting indicator (just the avatar, no bubble) ────────────────────── */
 
-function TypingIndicator() {
+function WaitingIndicator() {
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
       className="flex items-start gap-3"
     >
-      <div className="mt-0.5 size-10 shrink-0">
+      <div className="size-8 shrink-0">
         <NetworkGraph isTalking />
       </div>
-      <div className="flex items-center gap-1 rounded-2xl rounded-tl-sm bg-muted px-4 py-3">
-        <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/50 [animation-delay:0ms]" />
-        <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/50 [animation-delay:150ms]" />
-        <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/50 [animation-delay:300ms]" />
+      <div className="flex items-center pt-[5px]">
+        <span className="inline-block h-[1.1em] w-[2px] animate-pulse bg-foreground/40" />
       </div>
     </motion.div>
   );
@@ -130,9 +186,23 @@ export function HomeChatView({
   messagesEndRef,
   textareaRef,
 }: HomeChatViewProps) {
+  // Track which messages have already been animated.
+  // Initialize with all current message IDs so history messages don't animate.
+  const [animatedIds, setAnimatedIds] = useState(
+    () => new Set(messages.map((m) => m.id)),
+  );
+
+  const markAnimated = useCallback((id: string) => {
+    setAnimatedIds((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }, []);
+
   // Separate action buttons from regular suggestion chips
   const actionSuggestions = dynamicSuggestions.filter(
-    (s) => s.action === "create_project" || s.action === "create_design",
+    (s) => s.action === "create_project" || s.action === "create_design" || s.action === "go_to_project",
   );
   const messageSuggestions = dynamicSuggestions.filter(
     (s) => s.action === "send_message",
@@ -144,26 +214,35 @@ export function HomeChatView({
       <div className="flex-1 overflow-y-auto pr-1" data-chat-scroll>
         <div className="flex min-h-full flex-col justify-end space-y-8 py-4">
           <AnimatePresence initial={false}>
-            {messages.map((msg) => (
-              <motion.div
-                key={msg.id}
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{
-                  duration: 0.3,
-                  ease: [0.25, 0.4, 0, 1] as [number, number, number, number],
-                }}
-              >
-                {msg.role === "user" ? (
-                  <UserMessage content={msg.content} user={user} />
-                ) : (
-                  <AssistantMessage message={msg} />
-                )}
-              </motion.div>
-            ))}
+            {messages.map((msg) => {
+              const shouldAnimate =
+                msg.role === "assistant" && !animatedIds.has(msg.id);
+
+              return (
+                <motion.div
+                  key={msg.id}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{
+                    duration: 0.3,
+                    ease: [0.25, 0.4, 0, 1] as [number, number, number, number],
+                  }}
+                >
+                  {msg.role === "user" ? (
+                    <UserMessage content={msg.content} user={user} />
+                  ) : (
+                    <AssistantMessage
+                      message={msg}
+                      animate={shouldAnimate}
+                      onAnimationComplete={() => markAnimated(msg.id)}
+                    />
+                  )}
+                </motion.div>
+              );
+            })}
           </AnimatePresence>
 
-          {isProcessing && <TypingIndicator />}
+          <AnimatePresence>{isProcessing && <WaitingIndicator />}</AnimatePresence>
           <div ref={messagesEndRef} />
         </div>
       </div>
